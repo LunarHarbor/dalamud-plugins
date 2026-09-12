@@ -3,7 +3,7 @@
     "Author": "Marconsou; LunarHarbor",
     "Name": "Deep Dungeon Tracker — Pilgrim & Party",
     "InternalName": "DeepDungeonTrackerPilgrim",
-    "AssemblyVersion": "1.1.0.0",
+    "AssemblyVersion": "1.1.1.0",
     "Description": "Track solo and party runs, floor statistics, and score estimates. Independent community preview. Pilgrim’s Traverse scoring is provisional. Open settings with /ddtp.",
     "ApplicableVersion": "any",
     "RepoUrl": "https://github.com/LunarHarbor/dalamud-plugins",
@@ -26,12 +26,12 @@
     "Punchline": "Track Deep Dungeons, including Pilgrim’s Traverse and duo estimates.",
     "AcceptsFeedback": false,
     "IsHide": false,
-    "Changelog": "Pilgrim's Traverse and party estimates; improved capture and save recovery. Preview: in-game validation pending. Open /ddtp.",
-    "DownloadLinkTesting": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.0-preview/DeepDungeonTrackerPilgrim-1.1.0.0.zip",
-    "DownloadLinkInstall": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.0-preview/DeepDungeonTrackerPilgrim-1.1.0.0.zip",
-    "DownloadLinkUpdate": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.0-preview/DeepDungeonTrackerPilgrim-1.1.0.0.zip",
+    "Changelog": "Fixed capture lifecycle, existing save-slot isolation, score and timer accounting, recovery, and overlay controls. Preview: in-game validation pending. Open /ddtp.",
+    "DownloadLinkTesting": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.1-preview/DeepDungeonTrackerPilgrim-1.1.1.0.zip",
+    "DownloadLinkInstall": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.1-preview/DeepDungeonTrackerPilgrim-1.1.1.0.zip",
+    "DownloadLinkUpdate": "https://github.com/LunarHarbor/dalamud-plugins/releases/download/v1.1.1-preview/DeepDungeonTrackerPilgrim-1.1.1.0.zip",
     "IconUrl": "https://raw.githubusercontent.com/LunarHarbor/dalamud-plugins/main/DeepDungeonTracker/Resources/Promotion/icon.png",
-    "LastUpdate": 1789241336,
+    "LastUpdate": 1789247885,
     "IsTestingExclusive": false
   }
 ]
