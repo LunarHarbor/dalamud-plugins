@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -29,7 +29,10 @@ public class FloorSet
     [JsonInclude]
     public TimeSpan? BossClearTime { get; private set; }
 
-    public void MarkBossTime(TimeSpan elapsed) => this.BossClearTime ??= elapsed;
+    public void MarkBossTime(TimeSpan elapsed)
+    {
+        if (this.TimerKnown && elapsed >= TimeSpan.Zero) this.BossClearTime ??= elapsed;
+    }
 
     [JsonInclude]
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
@@ -41,7 +44,7 @@ public class FloorSet
         if (this.Failed || this.Completed) return;
         this.Completed = true;
         this.CurrentFloor()?.MarkCleared();
-        this.TimeBonus = this.TimerKnown && (this.BossClearTime ?? elapsed) < TimeSpan.FromMinutes(30);
+        this.TimeBonus = this.HasTimeBonus(elapsed);
     }
 
     public void Fail() { if (!this.Completed) { this.Failed = true; this.TimeBonus = false; } }
@@ -117,7 +120,13 @@ public class FloorSet
 
     public void CheckForTimeBonus(TimeSpan totalTime)
     {
-        if (this.Completed) this.TimeBonus = this.TimerKnown && (this.BossClearTime ?? totalTime) < TimeSpan.FromMinutes(30);
+        if (this.Completed) this.TimeBonus = this.HasTimeBonus(totalTime);
+    }
+
+    private bool HasTimeBonus(TimeSpan elapsed)
+    {
+        var time = this.BossClearTime ?? elapsed;
+        return this.TimerKnown && time >= TimeSpan.Zero && time < TimeSpan.FromMinutes(30);
     }
 
     public void NoTimeBonus() => this.TimeBonus = false;

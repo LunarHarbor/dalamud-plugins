@@ -1,4 +1,4 @@
-﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Bindings.ImGui;
 using System.Numerics;
 
 namespace DeepDungeonTracker;
@@ -33,7 +33,7 @@ public abstract class Button(Vector2 size)
         var pos = this.Position * scale;
         var size = this.Size * scale;
         this.IsMouseOver =
-            mousePos.X >= pos.X && mousePos.X <= pos.X + size.X &&
+            ImGui.IsWindowHovered() && mousePos.X >= pos.X && mousePos.X <= pos.X + size.X &&
             mousePos.Y >= pos.Y && mousePos.Y <= pos.Y + size.Y;
 
         if (!this.PreviousIsMouseOver && this.IsMouseOver)

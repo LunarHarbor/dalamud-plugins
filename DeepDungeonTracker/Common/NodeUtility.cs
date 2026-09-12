@@ -17,12 +17,12 @@ public unsafe static partial class NodeUtility
     private static int Aetherpool(AtkUnitBase* addon, int index)
     {
         var componentNode = AsComponent(NodeUtility.GetAddonChildNode(addon, index));
-        if (componentNode != null && componentNode->Component != null)
+        if (componentNode != null && componentNode->Component != null && componentNode->Component->UldManager.NodeList != null)
         {
             var manager = componentNode->Component->UldManager;
             for (var i = 0; i < manager.NodeListCount; i++)
             {
-                var textNode = manager.NodeList[i]->GetAsAtkTextNode();
+                var textNode = AsText(manager.NodeList[i]);
                 if (textNode != null)
                 {
                     var text = textNode->NodeText.ToString();
@@ -48,14 +48,14 @@ public unsafe static partial class NodeUtility
 
     private static AtkResNode* GetAddonChildNode(AtkUnitBase* addon, int index)
     {
-        if (addon == null)
+        if (addon == null || addon->UldManager.NodeList == null)
             return null;
         return (index >= 0 && index < addon->UldManager.NodeListCount) ? addon->UldManager.NodeList[index] : null;
     }
 
     private static AtkResNode* GetComponentChildNode(AtkComponentNode* componentNode, int index)
     {
-        if (componentNode == null || componentNode->Component == null)
+        if (componentNode == null || componentNode->Component == null || componentNode->Component->UldManager.NodeList == null)
             return null;
         return (index >= 0 && index < componentNode->Component->UldManager.NodeListCount) ? componentNode->Component->UldManager.NodeList[index] : null;
     }
@@ -124,12 +124,12 @@ public unsafe static partial class NodeUtility
     public static (bool, int) MapFloorNumber(IGameGui gameGui)
     {
         var addon = (AtkUnitBase*)gameGui?.GetAddonByName("DeepDungeonMap", 1).Address!;
-        if (addon == null)
+        if (addon == null || addon->UldManager.NodeList == null)
             return (false, -1);
 
         for (var i = 0; i < addon->UldManager.NodeListCount; i++)
         {
-            var textNode = addon->UldManager.NodeList[i]->GetAsAtkTextNode();
+            var textNode = AsText(addon->UldManager.NodeList[i]);
             if (textNode == null)
                 continue;
 
@@ -143,7 +143,7 @@ public unsafe static partial class NodeUtility
     public static IImmutableList<Node>? MapRoom(IGameGui gameGui)
     {
         var addon = (AtkUnitBase*)gameGui?.GetAddonByName("DeepDungeonMap", 1).Address!;
-        if (addon == null)
+        if (addon == null || addon->UldManager.NodeList == null)
             return null;
 
         IImmutableList<Node> nodes = ImmutableArray.Create<Node>();
@@ -157,8 +157,9 @@ public unsafe static partial class NodeUtility
             if (componentNode == null || componentNode->Component == null)
                 continue;
 
-            var imageNode = componentNode->Component->UldManager.NodeListCount > 0 ? componentNode->Component->UldManager.NodeList[0]->GetAsAtkImageNode() : null;
-            if (imageNode == null)
+            var childNode = GetComponentChildNode(componentNode, 0);
+            var imageNode = childNode == null ? null : childNode->GetAsAtkImageNode();
+            if (imageNode == null || imageNode->PartsList == null || resNode->Width == 0 || resNode->Height == 0)
                 continue;
 
             var x = resNode->X;
@@ -177,7 +178,7 @@ public unsafe static partial class NodeUtility
     public static bool CairnOfPassageActivation(IGameGui gameGui)
     {
         var addon = (AtkUnitBase*)gameGui?.GetAddonByName("DeepDungeonMap", 1).Address!;
-        if (addon == null)
+        if (addon == null || addon->UldManager.NodeList == null)
             return false;
 
         var skipFirst = false;
@@ -191,8 +192,9 @@ public unsafe static partial class NodeUtility
             if (componentNode == null || componentNode->Component == null)
                 continue;
 
-            var imageNode = componentNode->Component->UldManager.NodeListCount > 1 ? componentNode->Component->UldManager.NodeList[1]->GetAsAtkImageNode() : null;
-            if (imageNode == null)
+            var childNode = GetComponentChildNode(componentNode, 1);
+            var imageNode = childNode == null ? null : childNode->GetAsAtkImageNode();
+            if (imageNode == null || imageNode->PartsList == null)
                 continue;
 
             if (imageNode->PartsList->PartCount == 11)
@@ -212,17 +214,23 @@ public unsafe static partial class NodeUtility
     {
         static (bool, int) GetValue(AtkComponentNode* node)
         {
+            if (node == null || node->Component == null)
+                return (false, -1);
+
             var buffer = string.Empty;
             for (var i = node->Component->UldManager.NodeListCount - 1; i >= 0; i--)
             {
-                var resNode = node->Component->UldManager.NodeList[i]->GetAsAtkComponentNode();
-                if (resNode == null)
+                var resNode = AsComponent(GetComponentChildNode(node, i));
+                if (resNode == null || resNode->Component == null)
                     continue;
 
-                var imageNode = resNode->Component->UldManager.NodeListCount > 0 ? resNode->Component->UldManager.NodeList[0]->GetAsAtkImageNode() : null;
+                var childNode = GetComponentChildNode(resNode, 0);
+                var imageNode = childNode == null ? null : childNode->GetAsAtkImageNode();
                 if (imageNode == null)
                     continue;
 
+                if (imageNode->PartId > 9)
+                    return (false, -1);
                 buffer += imageNode->PartId.ToString(CultureInfo.InvariantCulture);
             }
             return int.TryParse(buffer, out int value) ? (true, value) : (false, -1);
@@ -232,11 +240,12 @@ public unsafe static partial class NodeUtility
         if (addon == null)
             return (false, -1);
 
-        var exitButton = addon->UldManager.NodeListCount > 2 ? addon->UldManager.NodeList[2]->GetAsAtkComponentButton() : null;
+        var exitNode = GetAddonChildNode(addon, 2);
+        var exitButton = exitNode == null ? null : exitNode->GetAsAtkComponentButton();
         if (exitButton == null || !exitButton->IsEnabled)
             return (false, -1);
 
-        var floorNode = addon->UldManager.NodeListCount > 13 ? addon->UldManager.NodeList[13]->GetAsAtkComponentNode() : null;
+        var floorNode = AsComponent(GetAddonChildNode(addon, 13));
         if (floorNode == null)
             return (false, -1);
 
@@ -244,7 +253,7 @@ public unsafe static partial class NodeUtility
         if (!result.Item1 || result.Item2 <= 0)
             return (false, -1);
 
-        var node = addon->UldManager.NodeListCount > index ? addon->UldManager.NodeList[index]->GetAsAtkComponentNode() : null;
+        var node = AsComponent(GetAddonChildNode(addon, index));
         if (node == null)
             return (false, -1);
 

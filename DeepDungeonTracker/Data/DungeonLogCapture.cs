@@ -16,7 +16,7 @@ public sealed class DungeonLogCapture : IDisposable
 
     private void OnMessage(ILogMessage message)
     {
-        if (!Service.Condition[ConditionFlag.InDeepDungeon] || this.Common.ContentId == 0) return;
+        if (!this.Common.IsCapturing) return;
         try
         {
             var type = message.LogMessageId;

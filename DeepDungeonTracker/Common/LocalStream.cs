@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Diagnostics;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
@@ -14,42 +15,66 @@ public static class LocalStream
 
     public static string? LastError { get; private set; }
 
+    private static readonly object FileSync = new();
+    private static readonly HashSet<string> UnreadablePaths = new(StringComparer.OrdinalIgnoreCase);
+
     public static Task Save<T>(string directory, string fileName, T data)
     {
         // Serialize before opening the destination.
         var bytes = JsonSerializer.SerializeToUtf8Bytes(data, LocalStream.Options);
-        Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, fileName);
-        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
+        var path = Path.GetFullPath(Path.Combine(directory, fileName));
+        lock (FileSync)
         {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            Directory.CreateDirectory(directory);
+            var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            try
             {
-                stream.Write(bytes);
-                stream.Flush(true);
+                using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    stream.Write(bytes);
+                    stream.Flush(true);
+                }
+                // A recovered save must not replace its good backup with the unreadable primary.
+                if (File.Exists(path)) File.Replace(temporary, path, UnreadablePaths.Contains(path) ? null : path + ".bak");
+                else File.Move(temporary, path);
+                UnreadablePaths.Remove(path);
             }
-            if (File.Exists(path)) File.Replace(temporary, path, path + ".bak");
-            else File.Move(temporary, path);
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
         }
-        finally { if (File.Exists(temporary)) File.Delete(temporary); }
         return Task.CompletedTask;
     }
 
-    public static T? Load<T>(string directory, string fileName)
+    public static T? Load<T>(string directory, string fileName, Func<T, bool>? validate = null)
     {
-        var path = Path.Combine(directory, fileName);
-        if (!File.Exists(path)) return default;
-        try { return JsonSerializer.Deserialize<T>(File.ReadAllText(path)); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        var path = Path.GetFullPath(Path.Combine(directory, fileName));
+        lock (FileSync)
         {
-            LastError = $"Could not read {Path.GetFileName(path)}: {e.Message}";
-            // Preserve the malformed file; try the previous save.
-            try { return File.Exists(path + ".bak") ? JsonSerializer.Deserialize<T>(File.ReadAllText(path + ".bak")) : default; }
-            catch (Exception backupError) when (backupError is IOException or UnauthorizedAccessException or JsonException)
-            { return default; }
+            if (!File.Exists(path)) return default;
+            T Read(string source)
+            {
+                var value = JsonSerializer.Deserialize<T>(File.ReadAllText(source));
+                if (value is null || (validate != null && !validate(value)))
+                    throw new JsonException("The saved data is empty or invalid.");
+                return value;
+            }
+
+            try
+            {
+                var value = Read(path);
+                UnreadablePaths.Remove(path);
+                return value;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+            {
+                UnreadablePaths.Add(path);
+                LastError = $"Could not read {Path.GetFileName(path)}: {e.Message}";
+                // Leave malformed input untouched while loading, and validate the previous save too.
+                try { return File.Exists(path + ".bak") ? Read(path + ".bak") : default; }
+                catch (Exception backupError) when (backupError is IOException or UnauthorizedAccessException or JsonException)
+                { return default; }
+            }
         }
     }
-
     public static bool Delete(string directory, string fileName)
     {
         var path = Path.Combine(directory, fileName);
@@ -97,8 +122,26 @@ public static class LocalStream
         return false;
     }
 
-    public static string[] GetFileNamesFromDirectory(string directory) => LocalStream.Exists(directory) ? Directory.EnumerateFiles(directory).ToArray() : [];
+    public static string[] GetFileNamesFromDirectory(string directory)
+    {
+        try { return LocalStream.Exists(directory) ? Directory.EnumerateFiles(directory).ToArray() : []; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            LastError = $"Could not list saved captures: {e.Message}";
+            return [];
+        }
+    }
 
+    public static string[] GetCaptureFileNames(string directory, string backupsDirectory) =>
+        GetFileNamesFromDirectory(backupsDirectory).Where(path => IsExtension(path, ".json"))
+            .Concat(GetFileNamesFromDirectory(directory).Where(path =>
+            {
+                var name = Path.GetFileName(path);
+                return IsExtension(name, ".json") &&
+                    (name.StartsWith("capture-", StringComparison.OrdinalIgnoreCase) ||
+                     name.StartsWith("attempt-", StringComparison.OrdinalIgnoreCase) ||
+                     name.StartsWith("archive-", StringComparison.OrdinalIgnoreCase));
+            })).OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToArray();
     public static void OpenFolder(string directory)
     {
         if (!LocalStream.Exists(directory))

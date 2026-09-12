@@ -1,4 +1,4 @@
-﻿using Dalamud.Game.ClientState.Objects.Types;
+using Dalamud.Game.ClientState.Objects.Types;
 using System;
 using System.Linq;
 
@@ -173,7 +173,7 @@ public sealed class BossStatusTimerManager : IDisposable
         if (player == null)
             return;
 
-        this.BossStatusTimerData.Update(enemy);
+        this.BossStatusTimerData.Update((byte)Math.Min(byte.MaxValue, enemy?.StatusList.FirstOrDefault(x => x.StatusId == 714)?.Param ?? 0));
 
         this.IsBossDead.Update(enemy?.IsDead ?? false);
 

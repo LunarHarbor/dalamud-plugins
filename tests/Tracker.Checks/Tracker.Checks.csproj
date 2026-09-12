@@ -15,6 +15,14 @@
     <Compile Include="../../DeepDungeonTracker/Data/MapData.cs" Link="Source/MapData.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/DeathLedger.cs" Link="Source/DeathLedger.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/PilgrimData.cs" Link="Source/PilgrimData.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/CaptureResumePolicy.cs" Link="Source/CaptureResumePolicy.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/CaptureFloorTransition.cs" Link="Source/CaptureFloorTransition.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/SaveSlotSelection.cs" Link="Source/SaveSlotSelection.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/BossStatusTimerData.cs" Link="Source/BossStatusTimerData.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/BossStatusTimerItem.cs" Link="Source/BossStatusTimerItem.cs" />
+    <Compile Include="../../DeepDungeonTracker/Common/TimeSpanExtension.cs" Link="Source/TimeSpanExtension.cs" />
+    <Compile Include="../../DeepDungeonTracker/Plugin/Configuration.cs" Link="Source/Configuration.cs" />
+    <Compile Include="../../DeepDungeonTracker/Common/Color.cs" Link="Source/Color.cs" />
     <Compile Include="../../DeepDungeonTracker/Common/LocalStream.cs" Link="Source/LocalStream.cs" />
     <Compile Include="../../DeepDungeonTracker/Enum/*.cs" Link="Source/%(Filename)%(Extension)" />
   </ItemGroup>

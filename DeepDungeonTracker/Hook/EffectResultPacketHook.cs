@@ -18,7 +18,8 @@ namespace DeepDungeonTracker.Hook
                     Service.SigScanner.ScanText(
                         "48 8B C4 44 88 40 ?? 89 48"),
                     HandleEffectResultPacketDetour);
-            _effectResultPacketHookDelegate.Enable();
+            try { _effectResultPacketHookDelegate.Enable(); }
+            catch { _effectResultPacketHookDelegate.Dispose(); throw; }
         }
 
         public void Dispose()

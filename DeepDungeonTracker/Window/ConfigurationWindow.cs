@@ -1,4 +1,4 @@
-﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Bindings.ImGui;
 using System;
 using System.Diagnostics;
 using System.Text.Json;
@@ -10,6 +10,7 @@ public sealed class ConfigurationWindow : WindowEx, IDisposable
     private Data Data { get; }
     private int ObservedScore;
     private int ObservedKills;
+    private FloorSet? ResultSet;
 
     private Action MainWindowToggleVisibility { get; }
 
@@ -113,6 +114,12 @@ public sealed class ConfigurationWindow : WindowEx, IDisposable
             return;
         }
         ImGui.Separator();
+        if (!ReferenceEquals(this.ResultSet, set))
+        {
+            this.ResultSet = set;
+            this.ObservedScore = set.ObservedScore ?? 0;
+            this.ObservedKills = set.ObservedKills ?? 0;
+        }
         ImGui.Text($"{slot.DeepDungeon} / floor {slot.CurrentFloorNumber()} / entry party {set.PartySize}");
         ImGui.TextWrapped(slot.DeepDungeon == DeepDungeon.PilgrimsTraverse
             ? ScoreEngine.PilgrimRulesVersion : ScoreEngine.RulesVersion);
@@ -256,12 +263,10 @@ public sealed class ConfigurationWindow : WindowEx, IDisposable
         this.Combo(config.FontType, x => config.FontType = x, "Font");
         this.Combo(config.ScoreCalculationType, x => config.ScoreCalculationType = x, "Score Calculation");
         WindowEx.Tooltip(
-            "Current Floor: Include all floor completion-related score up to the current floor, current character level and Aetherpool.\n" +
-            "You can see your score progressively increasing each time you go to the next floor, level up or upgrade your Aetherpool.\n\n" +
-            "Score Window Floor: Include all floor completion-related score up to the floor where it shows the next score window.\n\n" +
-            "Last Floor: Include all floor completion-related score at once.\n\n" +
-            "Floor completion-related score has nothing to do with map reveals: it will assume you are at a specific floor and Aetherpool is at max level (depending on the chosen setting) and also affect the points earned by killing enemies.\n" +
-            "It's recommended to change this option before starting a fresh save file.");
+            "Current Floor: Use captured progress, current character level, and observed Aetherpool.\n\n" +
+            "Score Window Floor: Project floor and kill scaling to the next normal/challenge score endpoint, assuming maximum character level and Aetherpool.\n\n" +
+            "Last Floor: Project the same values to the dungeon's final floor.\n\n" +
+            "Projected modes do not award unobserved map clears, boss defeats, or completed sets. All modes remain estimates.");
         this.DragFloat(config.Scale, x => config.Scale = x, "Scale", 0.01f, 0.25f, 2.0f, "%.2f");
         this.CheckBox(config.IsFlyTextScoreVisible, x => config.IsFlyTextScoreVisible = x, "##IsFlyTextScoreVisible");
         WindowEx.Tooltip("When the score changes, a Fly Text will be shown.");

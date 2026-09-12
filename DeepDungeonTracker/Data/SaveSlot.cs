@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -23,8 +23,7 @@ public class SaveSlot(DeepDungeon deepDungeon = DeepDungeon.None, int contentId 
     public ScoreRun Snapshot() => new(this.DeepDungeon, this.CurrentLevel, this.AetherpoolArm,
         this.AetherpoolArmor, this.KOs, this.FloorSets.Select((set, i) =>
         {
-            var legacyComplete = this.SchemaVersion < 2 &&
-                (i < this.FloorSets.Count - 1 || set.CurrentFloor()?.Number % 10 == 0);
+            var legacyComplete = this.SchemaVersion < 2 && !set.Failed && i < this.FloorSets.Count - 1;
             return new ScoreSet(set.PartySize, set.Completed || legacyComplete,
                 set.TimeBonus, set.Floors.Select((f, j) => new ScoreFloor(f.Number,
                     f.Cleared || (this.SchemaVersion < 2 && (legacyComplete || j < set.Floors.Count - 1)),
@@ -33,6 +32,42 @@ public class SaveSlot(DeepDungeon deepDungeon = DeepDungeon.None, int contentId 
                     f.Coffers.Count, f.Enchantments.Count, f.Traps.Count, f.Deaths, f.Map,
                     f.LocalDeaths, f.Candles, f.Pomanders.Count(p => p == Pomander.JuniperIncense))).ToArray());
         }).ToArray(), this.SchemaVersion);
+
+    public static bool IsValid(SaveSlot? save)
+    {
+        if (save == null || save.SchemaVersion is < 0 or > 2 || string.IsNullOrWhiteSpace(save.RunId) ||
+            save.CaptureNotes == null || save.CaptureNotes.Any(note => note == null) || save.FloorSets == null)
+            return false;
+        try
+        {
+            foreach (var set in save.FloorSets)
+            {
+                if (set == null || set.Floors == null || (set.Completed && set.Failed) ||
+                    set.ObservedScore is < 0 || set.ObservedKills is < 0 || set.BossClearTime < TimeSpan.Zero ||
+                    (set.BossStatusTimerData is { } timers && !timers.IsValid()))
+                    return false;
+                foreach (var floor in set.Floors)
+                {
+                    if (floor == null || floor.Time < TimeSpan.Zero || floor.Time > TimeSpan.FromHours(1) ||
+                        floor.CairnOfPassageKills < 0 || floor.RegenPotions < 0 ||
+                        floor.MapData == null || floor.MapData.RoomIds == null ||
+                        floor.MapData.RoomIds.Count != MapData.Length * MapData.Length || !Enum.IsDefined(floor.MapData.FloorType) ||
+                        floor.Coffers == null || floor.Coffers.Any(item => !Enum.IsDefined(item)) ||
+                        floor.Enchantments == null || floor.Enchantments.Any(item => !Enum.IsDefined(item)) ||
+                        floor.EnchantmentsSerenized == null || floor.EnchantmentsSerenized.Any(item => !Enum.IsDefined(item)) ||
+                        floor.Traps == null || floor.Traps.Any(item => !Enum.IsDefined(item)) ||
+                        floor.Pomanders == null || floor.Pomanders.Any(item => !Enum.IsDefined(item)))
+                        return false;
+                }
+            }
+            _ = ScoreEngine.Calculate(save.Snapshot()).Total;
+            _ = save.Score();
+            _ = save.Time();
+            return true;
+        }
+        catch (ArgumentException) { return false; }
+        catch (OverflowException) { return false; }
+    }
 
     [JsonInclude]
     public DeepDungeon DeepDungeon { get; private set; } = deepDungeon;
@@ -66,6 +101,12 @@ public class SaveSlot(DeepDungeon deepDungeon = DeepDungeon.None, int contentId 
     public TimeSpan Time() => new(this.FloorSets.Sum(x => x.Time().Ticks));
 
     public int Score() => this.FloorSets.Sum(x => x.Score());
+
+    public void UpdateCurrentFloorScore(int total)
+    {
+        if (this.CurrentFloor() is { } floor)
+            floor.ScoreUpdate(checked(total - (this.Score() - floor.Score)));
+    }
 
     public int Kills() => this.FloorSets.Sum(x => x.Kills());
 

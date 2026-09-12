@@ -20,7 +20,8 @@ namespace DeepDungeonTracker.Hook
                     Service.SigScanner.ScanText(
                         "40 53 48 83 EC ?? 48 8B DA 48 8D 0D ?? ?? ?? ?? 8B 52 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? F3 0F 10 5B"),
                     HandleOpenTreasurePacketDetour);
-            _openTreasurePacketHookDelegate.Enable();
+            try { _openTreasurePacketHookDelegate.Enable(); }
+            catch { _openTreasurePacketHookDelegate.Dispose(); throw; }
         }
 
         public void Dispose()
@@ -34,7 +35,7 @@ namespace DeepDungeonTracker.Hook
             try
             {
 
-                if (!Service.Condition[ConditionFlag.InDeepDungeon])
+                if (!this.DataCommon.IsCapturing)
                     return;
 
                 this.DataCommon.IsBronzeCofferOpened = true;

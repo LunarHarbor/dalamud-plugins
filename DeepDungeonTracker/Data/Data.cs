@@ -1,4 +1,4 @@
-﻿using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Inventory;
 using Dalamud.Game.Inventory.InventoryEventArgTypes;
 using Dalamud.Interface;
@@ -94,8 +94,8 @@ public sealed class Data : IDisposable
         RegenPotionConsumedEvents.Changed -= this.RegenPotionConsumedAction;
         TransferenceInitiatedEvents.Changed -= this.TransferenceInitiatedAction;
         DutyFailedEvents.Changed -= this.DutyFailedAction;
-        this.Common.Dispose();
-        this.UI.Dispose();
+        try { this.Common.Dispose(); }
+        finally { this.UI.Dispose(); }
     }
 
     public void Update(Configuration configuration)
@@ -245,13 +245,15 @@ public sealed class Data : IDisposable
     {
         if (this.InDeepDungeon.IsActivated)
         {
+            this.Common.CheckForBossKilled(this.Text);
+            this.Common.CheckForFloorChange();
             this.Common.DutyCompleted();
         }
     }
 
     public void InventoryChangedRaw(IReadOnlyCollection<InventoryEventArgs> inventoryEventArgs)
     {
-        if (!this.InDeepDungeon.IsActivated)
+        if (!this.Common.IsCapturing)
             return;
 
         if (!this.Common.IsLastFloor)
@@ -259,12 +261,14 @@ public sealed class Data : IDisposable
             if (!this.Common.IsBronzeCofferOpened)
                 return;
 
-            this.Common.IsBronzeCofferOpened = false;
-
             foreach (InventoryEventArgs e in inventoryEventArgs ?? [])
             {
                 if (e.Type is GameInventoryEvent.Added or GameInventoryEvent.Changed)
                 {
+                    if (e is InventoryItemChangedArgs changed && changed.OldItemState.ItemId == e.Item.ItemId &&
+                        changed.OldItemState.Quantity >= e.Item.Quantity) continue;
+                    if (e.Item.ItemId == 0 || e.Item.Quantity == 0) continue;
+                    this.Common.IsBronzeCofferOpened = false;
                     var itemId = e.Item.ItemId;
 
                     var potsherdItemIds = new uint[] { 15422, 23164, 38941, 46186 };

@@ -1,5 +1,13 @@
 # Patch notes
 
+## 1.1.1 — September 12, 2026
+
+- Fixed capture startup and recovery across duties and plugin reloads.
+- Kept existing game save slots separate when installing during ongoing runs.
+- Corrected completion, timer, and stored score accounting.
+- Improved corrupt-save recovery and validation.
+- Hardened native UI reads and overlay interaction.
+
 ## 1.1.0 — September 12, 2026
 
 - Added Pilgrim's Traverse tracking and solo/party score estimates.

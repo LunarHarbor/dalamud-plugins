@@ -9,6 +9,10 @@ The live score is an estimate. Pilgrim and party formulas remain provisional; in
 
 Settings → Validation contains game-result comparison, manual result entry, and local exports. If automatic save-slot selection is unavailable, associate the game save slot there before the next set.
 
+You can install with both game save slots already in progress. Resume each slot normally; the tracker records each separately from the first observed floor. Earlier floors, kills, and bonuses cannot be recovered, so that run's estimate covers an incomplete capture. See Settings → Validation for its capture notes. If the slot cannot be identified, the capture is saved separately instead of replacing either slot's history.
+
+Installing or reloading inside a duty does not identify which game slot is active. Use Settings → Validation → Associate game save slot during that duty if needed. Existing tracker history is archived before replacement. Unassociated captures and archived attempts are available in `/ddtpmain` under Other captures.
+
 Run data is stored separately from the original plugin. Exports omit character names and identifiers. Nothing is uploaded automatically.
 
 For manual installation, extract the complete release ZIP and add `DeepDungeonTrackerPilgrim.dll` to Dalamud's Dev Plugin Locations.

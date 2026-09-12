@@ -61,6 +61,11 @@ public static class ScoreEngine
             _ = PartyBonus(set.PartySize);
             if (set.Floors.Length == 0 || (set.Completed && set.Floors.Any(f => !f.Cleared)))
                 throw new ArgumentException("A completed set must contain cleared floors.", nameof(run));
+            if (set.Floors.Any(f => (f.Number - 1) / 10 != (set.Floors[0].Number - 1) / 10) ||
+                (set.Completed && set.Floors[^1].Number % 10 != 0))
+                throw new ArgumentException("Floor sets must remain within their ten-floor boundary and complete on its last floor.", nameof(run));
+            if (set.Floors.Any(f => f.BossDefeated && !IsBossFloor(run.Dungeon, f.Number)))
+                throw new ArgumentException("A boss defeat must belong to a boss floor.", nameof(run));
             foreach (var f in set.Floors)
                 if (new[] { f.Kills, f.Mimics, f.Mandragoras, f.NPCs, f.DreadBeasts,
                     f.Coffers, f.Enchantments, f.Traps, f.Deaths, f.LocalDeaths, f.Candles, f.IncenseUses }.Any(n => n < 0) ||

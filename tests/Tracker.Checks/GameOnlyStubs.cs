@@ -1,7 +1,6 @@
 namespace DeepDungeonTracker;
 
-// Game-only timer stubs.
-public sealed class BossStatusTimerData { public void TimerEnd() => throw new NotSupportedException(); }
+// Game-only timer manager stub; serialized timer models are production code.
 public sealed class BossStatusTimerManager
 {
     public BossStatusTimerManager(BossStatusTimerData data, Action action) { }

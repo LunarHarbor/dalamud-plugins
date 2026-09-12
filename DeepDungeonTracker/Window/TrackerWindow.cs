@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
@@ -79,12 +79,12 @@ public sealed class TrackerWindow(string id, Configuration configuration, Data d
         var lineHeight = 30.0f;
         var NPCindex = 4;
 
-        bool ShowSpecial(DeepDungeon deepDungeon) => (config?.Fields?[NPCindex].Show ?? false) && CheckForDeepDungeon(deepDungeon);
+        bool ShowSpecial(DeepDungeon deepDungeon) => (config.Fields.FirstOrDefault(field => field.Index == NPCindex)?.Show ?? false) && CheckForDeepDungeon(deepDungeon);
 
         var ShowNPCs = ShowSpecial(DeepDungeon.PalaceOfTheDead);
         var ShowDreadBeasts = ShowSpecial(DeepDungeon.EurekaOrthos);
 
-        var numberOfLines = (config.Fields?.Where((x, Index) => Index != NPCindex).Count(x => x.Show) ?? 0) + (ShowNPCs || ShowDreadBeasts ? 1 : 0);
+        var numberOfLines = config.Fields.Count(field => field.Index != NPCindex && field.Show) + (ShowNPCs || ShowDreadBeasts ? 1 : 0);
         var width = 380.0f;
         var height = (top + (lineHeight * numberOfLines) - 3.0f);
         var columnX = 170;

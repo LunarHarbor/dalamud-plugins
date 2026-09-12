@@ -1,4 +1,4 @@
-﻿using Dalamud.Configuration;
+using Dalamud.Configuration;
 using Dalamud.Plugin;
 using System;
 using System.Linq;
@@ -167,7 +167,36 @@ public class Configuration : IPluginConfiguration
 
     public Configuration() => this.Reset();
 
-    public void Initialize(IDalamudPluginInterface pluginInterface) => this.PluginInterface = pluginInterface;
+    public void Initialize(IDalamudPluginInterface pluginInterface)
+    {
+        this.PluginInterface = pluginInterface;
+        this.Normalize();
+    }
+
+    public void Normalize()
+    {
+        this.Main ??= new();
+        this.Tracker ??= new();
+        this.FloorSetTime ??= new();
+        this.Score ??= new();
+        this.Statistics ??= new();
+        this.BossStatusTimer ??= new();
+        static float Scale(float value) => float.IsFinite(value) ? Math.Clamp(value, 0.25f, 2.0f) : 1.0f;
+        this.Main.Scale = Scale(this.Main.Scale);
+        this.Tracker.Scale = Scale(this.Tracker.Scale);
+        this.FloorSetTime.Scale = Scale(this.FloorSetTime.Scale);
+        this.Score.Scale = Scale(this.Score.Scale);
+        this.Statistics.Scale = Scale(this.Statistics.Scale);
+        this.BossStatusTimer.Scale = Scale(this.BossStatusTimer.Scale);
+        if (!Enum.IsDefined(this.Tracker.FontType)) this.Tracker.FontType = FontType.Default;
+        if (!Enum.IsDefined(this.Score.FontType)) this.Score.FontType = FontType.Default;
+        if (!Enum.IsDefined(this.Score.ScoreCalculationType)) this.Score.ScoreCalculationType = ScoreCalculationType.CurrentFloor;
+        // Keep the user's order and visibility, repairing missing or malformed field entries.
+        var fields = (this.Tracker.Fields ?? []).Where(field => field != null && field.Index is >= 0 and < 14)
+            .DistinctBy(field => field.Index).ToList();
+        fields.AddRange(new TrackerTab().Fields.Where(field => fields.All(existing => existing.Index != field.Index)));
+        this.Tracker.Fields = fields.ToArray();
+    }
 
     public void Save() => this.PluginInterface!.SavePluginConfig(this);
 

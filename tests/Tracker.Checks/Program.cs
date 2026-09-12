@@ -162,6 +162,10 @@ finally
         throw new InvalidOperationException("Unexpected temporary check directory.");
     Directory.Delete(resolved, true);
 }
+checks += ScoreReviewChecks.Run();
+checks += CaptureReviewChecks.Run();
+checks += TimerReviewChecks.Run();
+checks += UiSaveReviewChecks.Run();
 Console.WriteLine($"PASS: {checks} score, capture, lifecycle, mapping, and persistence checks.");
 
 sealed class Unserializable { public string Value => throw new InvalidOperationException("synthetic serialization failure"); }

@@ -14,9 +14,12 @@ public class FloorSetTime
 
     public ICollection<TimeSpan> PreviousFloorsTime { get; } = [];
 
-    public TimeSpan TotalTime => new(Math.Min(((this.PauseTime ?? DateTime.Now) - (this.StartTime ?? DateTime.Now)).Ticks, FloorSetTime.InstanceTime.Ticks));
+    public TimeSpan TotalTime => this.StartTime is { } start
+        ? new(Math.Clamp(((this.PauseTime ?? DateTime.Now) - start).Ticks, 0, FloorSetTime.InstanceTime.Ticks))
+        : TimeSpan.Zero;
 
-    public TimeSpan CurrentFloorTime => new((this.TotalTime - new TimeSpan(this.PreviousFloorsTime.Sum(x => x.Ticks))).Ticks / 10000000 * 10000000);
+    public TimeSpan CurrentFloorTime => new(Math.Max(0, this.TotalTime.Ticks - this.PreviousFloorsTime.Sum(x => x.Ticks))
+        / TimeSpan.TicksPerSecond * TimeSpan.TicksPerSecond);
 
     public TimeSpan Average => new(this.TotalTime.Ticks / (this.PreviousFloorsTime.Count + 1));
 

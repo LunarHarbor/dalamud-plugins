@@ -1,49 +1,37 @@
 using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Hooking;
 using DeepDungeonTracker.Event;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using FFXIVClientStructs.FFXIV.Client.Network;
 using System;
 
-namespace DeepDungeonTracker.Hook
+namespace DeepDungeonTracker.Hook;
+
+public sealed unsafe class PacketActorControlHook : IDisposable
 {
-    // Took from https://github.com/wolfcomp/AllaganKillFeed/blob/master/PacketCapture.cs
-    public sealed class PacketActorControlHook : IDisposable
+    private readonly Hook<PacketDispatcher.Delegates.HandleActorControlPacket> PacketHook;
+
+    public PacketActorControlHook()
     {
-        private delegate void ProcessPacketActorControlDelegate(uint entityId, uint type, uint param1, uint param2, uint param3, uint param4, uint param5, uint param6, uint param7, uint param8, ulong param9, byte isReplay);
+        this.PacketHook = Service.GameInteropProvider.HookFromAddress<PacketDispatcher.Delegates.HandleActorControlPacket>(
+            (nint)PacketDispatcher.MemberFunctionPointers.HandleActorControlPacket, this.ProcessPacket);
+        try { this.PacketHook.Enable(); }
+        catch { this.PacketHook.Dispose(); throw; }
+    }
 
-        private readonly Hook<ProcessPacketActorControlDelegate>? _packetActorControlHookDelegate;
+    public void Dispose() => this.PacketHook.Dispose();
 
-        public PacketActorControlHook()
+    private void ProcessPacket(uint entityId, uint category, uint arg1, uint arg2, uint arg3, uint arg4,
+        uint arg5, uint arg6, uint arg7, uint arg8, GameObjectId targetId, bool isRecorded)
+    {
+        this.PacketHook.Original(entityId, category, arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, targetId, isRecorded);
+        try
         {
-            _packetActorControlHookDelegate = Service.GameInteropProvider.HookFromAddress<ProcessPacketActorControlDelegate>(Service.SigScanner.ScanText("E8 ?? ?? ?? ?? 0F B7 0B 83 E9"), ProcessPacketActorControlDetour);
-            _packetActorControlHookDelegate.Enable();
+            if (isRecorded || !Service.Condition[ConditionFlag.InDeepDungeon]) return;
+            if (category == 0x6) CharacterKilledEvents.Publish(entityId);
+            else if (category == 0x6D && arg2 == 0x4000_000E) NewFloorEvents.Publish();
+            else if (category == 0x6D && arg2 == 0x4000_0005) DutyFailedEvents.Publish();
         }
-
-        public void Dispose()
-        {
-            _packetActorControlHookDelegate?.Dispose();
-        }
-
-        private void ProcessPacketActorControlDetour(uint entityId, uint type, uint param1, uint param2, uint param3, uint param4, uint param5, uint param6, uint param7, uint param8, ulong param9, byte isReplay)
-        {
-            _packetActorControlHookDelegate!.Original(entityId, type, param1, param2, param3, param4, param5, param6, param7, param8, param9, isReplay);
-            try
-            {
-
-                if (isReplay != 0)
-                    return; // Ignore replays
-
-                if (!Service.Condition[ConditionFlag.InDeepDungeon])
-                    return;
-
-                switch (type)
-                {
-                    case 0x6: // Death
-                        CharacterKilledEvents.Publish(entityId);
-                        break;
-                }
-            }
-            catch (Exception e) { CaptureDiagnostics.Report("PacketActorControlHook capture failed", e); }
-
-        }
+        catch (Exception e) { CaptureDiagnostics.Report("Actor control capture failed", e); }
     }
 }

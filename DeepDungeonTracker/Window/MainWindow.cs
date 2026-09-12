@@ -1,8 +1,9 @@
-﻿using Dalamud.Bindings.ImGui;
+using Dalamud.Bindings.ImGui;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.IO;
 using Action = System.Action;
 
 namespace DeepDungeonTracker;
@@ -19,7 +20,7 @@ public sealed class MainWindow : WindowEx, IDisposable
 
     private int PreviousBackupFileTotal { get; set; }
 
-    private string SelectedBackupFileName { get; set; } = null!;
+    private string SelectedBackupPath { get; set; } = null!;
 
     private OpenFolderButton BackupFolderButton { get; } = new();
 
@@ -47,7 +48,7 @@ public sealed class MainWindow : WindowEx, IDisposable
 
     private static int BackupFilesPerPage => 10;
 
-    private static string[] BackupFileNames => LocalStream.GetFileNamesFromDirectory(Directories.Backups).Where(x => LocalStream.IsExtension(x, ".json")).ToArray();
+    private static string[] BackupFileNames => LocalStream.GetCaptureFileNames(ServiceUtility.ConfigDirectory, Directories.Backups);
 
     public MainWindow(string id, Configuration configuration, Data data, Action openStatisticsWindow) : base(id, configuration, WindowEx.StaticNoBackgroundMoveInputs)
     {
@@ -84,7 +85,7 @@ public sealed class MainWindow : WindowEx, IDisposable
         void BackupNext()
         {
             this.BackupIndex++;
-            var max = MainWindow.BackupFileNames.Length - MainWindow.BackupFilesPerPage;
+            var max = Math.Max(0, MainWindow.BackupFileNames.Length - MainWindow.BackupFilesPerPage);
             if (this.BackupIndex > max)
                 this.BackupIndex = max;
         }
@@ -116,7 +117,7 @@ public sealed class MainWindow : WindowEx, IDisposable
         else if (this.BackupFolderButton.OnMouseLeftClickRelease())
         {
             this.Data.Audio.PlaySound(SoundIndex.OnClick);
-            LocalStream.OpenFolder(Directories.Backups);
+            LocalStream.OpenFolder(ServiceUtility.ConfigDirectory);
         }
         else if (this.CloseButton.OnMouseLeftClick())
             this.IsOpen = false;
@@ -140,6 +141,7 @@ public sealed class MainWindow : WindowEx, IDisposable
         var centerX = width / 2.0f;
         var centerY = height / 2.0f;
         var saveSlotSelection = this.Data.Common.SaveSlotSelection.GetData();
+        this.SaveSlotArrowButtonPrevious.Show = this.SaveSlotArrowButtonNext.Show = saveSlotSelection.Count > 1;
 
         this.SaveSlotArrowButtonPrevious.Position = new(centerX - 100.0f, 43.0f);
         this.SaveSlotArrowButtonNext.Position = new(centerX + 64.0f, 43.0f);
@@ -154,9 +156,8 @@ public sealed class MainWindow : WindowEx, IDisposable
                 this.SaveSlotArrowButtonNext.Draw(ui, audio);
             }
 
+            this.SaveSlotIndex = Math.Clamp(this.SaveSlotIndex, 0, saveSlotSelection.Count - 1);
             var saveSlot = saveSlotSelection.ElementAt(this.SaveSlotIndex);
-
-            saveSlotSelection.TryGetValue(saveSlot.Key, out var saveSlotSelectionData);
             ui.DrawTextAxis(centerX, 83.0f, $"{saveSlot.Key.Replace("-", "  (", StringComparison.InvariantCultureIgnoreCase)})", Color.White, Alignment.Center);
 
             void Buttons(TextButton mainButton, BackupButton backupButton, float x, float y, string saveSlotText, KeyValuePair<string, SaveSlotSelection.SaveSlotSelectionData> saveSlot, DeepDungeon deepDungeon, int saveSlotNumber, string fileName, bool enableButtons)
@@ -215,7 +216,7 @@ public sealed class MainWindow : WindowEx, IDisposable
 
                     var saveSlotEnableButtons =
                             (!this.Data.IsInsideDeepDungeon && LocalStream.Exists(ServiceUtility.ConfigDirectory, saveSlotfileName)) ||
-                            (this.Data.IsInsideDeepDungeon && this.Data.Common.GetSaveSlotFileName(saveSlotSelectionData ?? new()) == saveSlotfileName);
+                            (this.Data.IsInsideDeepDungeon && this.Data.Common.GetSaveSlotFileName(this.Data.Common.SaveSlotSelection.GetCaptureSelectionData()) == saveSlotfileName);
 
                     var lastSaveEnableButtons =
                            (!this.Data.IsInsideDeepDungeon && LocalStream.Exists(ServiceUtility.ConfigDirectory, lastSaveFileName));
@@ -241,9 +242,11 @@ public sealed class MainWindow : WindowEx, IDisposable
         this.BackupFolderButton.Position = new(width - 50.0f, centerY + 10.0f);
         this.BackupFolderButton.Draw(ui, audio);
 
-        ui.DrawTextMiedingerMid(centerX, centerY + 23.0f, "Backups", Color.White, Alignment.Center);
+        ui.DrawTextMiedingerMid(centerX, centerY + 23.0f, "Other captures", Color.White, Alignment.Center);
 
-        var fileNames = LocalStream.GetFileNamesFromDirectory(Directories.Backups).Where(x => LocalStream.IsExtension(x, ".json")).OrderBy(x => x).ToArray();
+        var fileNames = MainWindow.BackupFileNames;
+        this.BackupArrowButtonPrevious.Show = this.BackupSlotArrowButtonNext.Show = fileNames.Length > MainWindow.BackupFilesPerPage;
+        this.BackupIndex = Math.Clamp(this.BackupIndex, 0, Math.Max(0, fileNames.Length - MainWindow.BackupFilesPerPage));
         if (fileNames.Length > 0)
         {
             foreach (var button in this.BackupFileButtons)
@@ -304,14 +307,14 @@ public sealed class MainWindow : WindowEx, IDisposable
 
                 var backupDeleteButton = this.BackupDeleteButtons[buttonIndex];
 
-                backupDeleteButton.Show = true;
+                backupDeleteButton.Show = enableButtons;
                 backupDeleteButton.Position = new(x - backupDeleteButton.Size.X - 15.0f, y + (backupFileButton.Size.Y / 2.0f) - (backupDeleteButton.Size.Y / 2.0f));
-                backupDeleteButton.Draw(ui, audio);
+                if (enableButtons) backupDeleteButton.Draw(ui, audio);
 
                 if (backupDeleteButton.OnMouseLeftClick())
                 {
                     this.Data.Audio.PlaySound(SoundIndex.OnClick);
-                    this.SelectedBackupFileName = formattedFileName;
+                    this.SelectedBackupPath = fileName;
                     ImGui.OpenPopup(deleteDialog);
                 }
 
@@ -328,7 +331,7 @@ public sealed class MainWindow : WindowEx, IDisposable
             this.ModalWindow(deleteDialog);
         }
         else
-            ui.DrawTextAxis(centerX, centerY + (centerY / 2.0f) + 15.0f, "No backups!", Color.White, Alignment.Center);
+            ui.DrawTextAxis(centerX, centerY + (centerY / 2.0f) + 15.0f, "No other captures!", Color.White, Alignment.Center);
     }
 
     private void ModalWindow(string deleteDialog)
@@ -340,13 +343,14 @@ public sealed class MainWindow : WindowEx, IDisposable
         if (ImGui.BeginPopupModal(deleteDialog, ref visibility, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.Text("Are you sure you want to delete this item?");
-            ImGui.Text($"{this.SelectedBackupFileName}");
+            ImGui.Text(LocalStream.FormatFileName(this.SelectedBackupPath, false));
             ImGui.Separator();
             this.Button(() =>
             {
                 this.Data.Audio.PlaySound(SoundIndex.OnClick);
-                var deletedFileName = $"{this.SelectedBackupFileName}.json";
-                LocalStream.Delete(Directories.Backups, deletedFileName);
+                if (this.Data.IsInsideDeepDungeon) { ImGui.CloseCurrentPopup(); return; }
+                var deletedFileName = Path.GetFileName(this.SelectedBackupPath);
+                LocalStream.Delete(Path.GetDirectoryName(this.SelectedBackupPath)!, deletedFileName);
                 Service.ChatGui.Print($"A file has been deleted! ({deletedFileName})");
                 ImGui.CloseCurrentPopup();
             }, "Confirm");
@@ -390,7 +394,7 @@ public sealed class MainWindow : WindowEx, IDisposable
         ui.DrawBackground(width, height, (!config.SolidBackground && this.IsFocused) || config.SolidBackground);
         ui.DrawDivisorHorizontal(14.0f, 34.0f, width - 26.0f);
         ui.DrawDivisorHorizontal(14.0f, 500.0f, width - 26.0f);
-        ui.DrawTextTrumpGothic(15.0f, 5.0f, "Save Slots & Backups", new(0.8197f, 0.8197f, 0.8197f, 1.0f), Alignment.Left);
+        ui.DrawTextTrumpGothic(15.0f, 5.0f, "Saved Runs", new(0.8197f, 0.8197f, 0.8197f, 1.0f), Alignment.Left);
 
         this.CloseButton.Position = new(width - 35.0f, 7.0f);
         this.CloseButton.Draw(ui, audio);

@@ -1,4 +1,3 @@
-﻿using Dalamud.Game.ClientState.Objects.Types;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -110,14 +109,28 @@ public class BossStatusTimerData
     [JsonPropertyName("RehabilitationEurekaOrthos")]
     public Collection<BossStatusTimerItem>? SerializationRehabilitationEurekaOrthos { get => this.RehabilitationEurekaOrthos?.Count > 0 ? this.RehabilitationEurekaOrthos : null; private set => this.RehabilitationEurekaOrthos = value ?? []; }
 
-    public void Update(IBattleChara? enemy)
+    public void Update(byte stacks)
     {
         var vulnerabilityUp = this.VulnerabilityUp.LastOrDefault();
         if (vulnerabilityUp != null)
         {
-            var stacks = enemy?.StatusList.FirstOrDefault(x => x.StatusId == 714)?.Param ?? 0;
             vulnerabilityUp.StacksUpdate((byte)Math.Max(vulnerabilityUp.Stacks, stacks));
         }
+    }
+
+    public bool IsValid()
+    {
+        static bool ValidItem(BossStatusTimerItem? item) => item != null &&
+            Enum.IsDefined(item.BossStatusTimer) &&
+            (!item.HasEnded() || (item.HasStarted() && item.End >= item.Start));
+        Collection<BossStatusTimerItem>[] groups =
+        [
+            this.Medicated, this.AccursedPox, this.Weakness, this.BrinkOfDeath,
+            this.DamageUp, this.VulnerabilityDown, this.VulnerabilityUp, this.Enervation,
+            this.DamageUpHeavenOnHigh, this.VulnerabilityDownHeavenOnHigh, this.RehabilitationHeavenOnHigh,
+            this.DamageUpEurekaOrthos, this.VulnerabilityDownEurekaOrthos, this.RehabilitationEurekaOrthos
+        ];
+        return ValidItem(this.Combat) && groups.All(group => group != null && group.All(ValidItem));
     }
 
     public void TimerEnd()

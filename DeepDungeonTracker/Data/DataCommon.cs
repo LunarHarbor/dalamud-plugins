@@ -1,4 +1,4 @@
-﻿using Dalamud.Game.ClientState.Objects.Enums;
+using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.Types;
 using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using System;
@@ -15,6 +15,13 @@ public sealed unsafe class DataCommon : IDisposable
 {
     private readonly DeathLedger RecordedDeaths = new();
     private DateTime NextCheckpoint = DateTime.MinValue;
+    private bool IsInside { get; set; }
+    private bool HasStartedCapture { get; set; }
+    private bool CompletionPending { get; set; }
+    private string? CaptureFileName { get; set; }
+    private string? InitializedCharacterKey { get; set; }
+    public bool IsCapturing => this.IsInside && this.HasStartedCapture && this.DutyStatus == DutyStatus.None &&
+        this.CurrentSaveSlot?.CurrentFloorSet() is { Completed: false, Failed: false };
     private readonly HashSet<uint> DefeatedBosses = [];
     public string? LastExportPath { get; private set; }
     public string? StorageError { get; private set; }
@@ -25,7 +32,12 @@ public sealed unsafe class DataCommon : IDisposable
 
     public bool IsTransferenceInitiated { get; private set; }
 
-    public bool IsBronzeCofferOpened { get; set; }
+    private DateTime BronzeCofferPendingUntil { get; set; }
+    public bool IsBronzeCofferOpened
+    {
+        get => DateTime.UtcNow < this.BronzeCofferPendingUntil;
+        set => this.BronzeCofferPendingUntil = value ? DateTime.UtcNow.AddSeconds(5) : DateTime.MinValue;
+    }
 
     public bool IsSupportedParty { get; private set; }
 
@@ -53,7 +65,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public SaveSlot? CurrentSaveSlot { get; private set; }
 
-    public SaveSlotSelection SaveSlotSelection { get; } = new();
+    public SaveSlotSelection SaveSlotSelection { get; } = new(ServiceUtility.ConfigDirectory, e => CaptureDiagnostics.Report("Save slot selection failed", e));
 
     public FloorSetTime FloorSetTime { get; private set; } = new();
 
@@ -96,8 +108,8 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void Checkpoint(bool force = false)
     {
-        if (this.CurrentSaveSlot?.CurrentFloorSet() is not { Completed: false, Failed: false } ||
-            !IsValidContent(this.CurrentSaveSlot.DeepDungeon, this.ContentId)) return;
+        if (!this.IsCapturing ||
+            !IsValidContent(this.CurrentSaveSlot!.DeepDungeon, this.ContentId)) return;
         if (!force && DateTime.UtcNow < this.NextCheckpoint) return;
         this.NextCheckpoint = DateTime.UtcNow.AddSeconds(15);
         this.CurrentSaveSlot.CurrentFloor()?.TimeUpdate(this.FloorSetTime.CurrentFloorTime);
@@ -106,14 +118,30 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void ResetCharacterData()
     {
+        this.Checkpoint(force: true);
         this.CharacterName = string.Empty;
         this.ServerName = string.Empty;
+        this.InitializedCharacterKey = null;
+        this.HasStartedCapture = false;
+        this.CaptureFileName = null;
+        this.CurrentSaveSlot = null;
+        this.Score = null;
+        this.SaveSlotSelection.ResetSelectionData();
         this.FloorSetTime = new();
         this.FloorEffect = new();
     }
 
     public void EnteringDeepDungeon()
     {
+        this.IsInside = true;
+        this.HasStartedCapture = false;
+        this.CompletionPending = false;
+        this.CurrentSaveSlot = null;
+        this.Score = null;
+        this.CaptureFileName = null;
+        this.NextCheckpoint = DateTime.MinValue;
+        this.BossStatusTimerManager?.Dispose();
+        this.BossStatusTimerManager = null;
         this.IsTransferenceInitiated = false;
         this.IsBronzeCofferOpened = false;
         this.IsSupportedParty = ServiceUtility.IsSupportedParty;
@@ -128,22 +156,29 @@ public sealed unsafe class DataCommon : IDisposable
         this.NearbyEnemies = [];
         this.CairnOfPassageKillIds = [];
         this.DutyStatus = DutyStatus.None;
-        this.CurrentSaveSlot?.ContentIdUpdate(0);
     }
 
     public void ExitingDeepDungeon()
     {
         this.EnableFlyTextScore = false;
-        if (this.DutyStatus == DutyStatus.None && this.CurrentSaveSlot != null)
-            this.DutyFailed();
-        this.SaveDeepDungeonData();
+        if (this.CompletionPending && this.IsCapturing &&
+            CaptureFloorTransition.ReachCompletedSetEnd(this.CurrentSaveSlot!, this.FloorSetTime))
+            this.DutyCompleted();
+        if (this.IsCapturing && !this.CompletionPending) this.DutyFailed();
+        if (this.HasStartedCapture) this.SaveDeepDungeonData();
+        this.IsInside = false;
+        this.HasStartedCapture = false;
+        this.SaveSlotSelection.ResetSelectionData();
+        this.IsBronzeCofferOpened = false;
+        this.BossStatusTimerManager?.Dispose();
+        this.BossStatusTimerManager = null;
     }
 
     public void EnteringCombat()
     {
-        if (this.IsBossFloor)
-            this.BossStatusTimerManager =
-                this.CurrentSaveSlot?.CurrentFloorSet()?.StartBossStatusTimer(this.ExitingCombat);
+        if (!this.IsCapturing || !this.IsBossFloor) return;
+        this.BossStatusTimerManager?.Dispose();
+        this.BossStatusTimerManager = this.CurrentSaveSlot?.CurrentFloorSet()?.StartBossStatusTimer(this.ExitingCombat);
     }
 
     public void ExitingCombat()
@@ -153,10 +188,10 @@ public sealed unsafe class DataCommon : IDisposable
     }
 
     public static string GetSaveSlotFileName(string key, SaveSlotSelection.SaveSlotSelectionData? data) =>
-        data != null ? $"{key}-dd{(int)data.DeepDungeon}s{data.SaveSlotNumber}.json" : string.Empty;
+        SaveSlotSelection.GetSaveSlotFileName(key, data);
 
     public static string GetLastSaveFileName(string key, SaveSlotSelection.SaveSlotSelectionData? data) =>
-        data != null ? $"{key}-dd{(int)data.DeepDungeon}s{data.SaveSlotNumber}Last.json" : string.Empty;
+        SaveSlotSelection.GetSaveSlotFileName(key, data, last: true);
 
     public string GetSaveSlotFileName(SaveSlotSelection.SaveSlotSelectionData? data) =>
         DataCommon.GetSaveSlotFileName(this.CharacterKey, data);
@@ -166,11 +201,8 @@ public sealed unsafe class DataCommon : IDisposable
 
     private void SaveDeepDungeonData()
     {
-        if (this.CurrentSaveSlot == null || !IsValidContent(this.CurrentSaveSlot.DeepDungeon, this.ContentId)) return;
-        var data = this.SaveSlotSelection.GetSelectionData(this.CharacterKey);
-        var fileName = data?.DeepDungeon == this.CurrentSaveSlot.DeepDungeon && data.SaveSlotNumber is 1 or 2
-            ? DataCommon.GetSaveSlotFileName(this.CharacterKey, data)
-            : $"capture-{this.CurrentSaveSlot.RunId}.json";
+        if (this.CurrentSaveSlot == null || !IsValidContent(this.CurrentSaveSlot!.DeepDungeon, this.ContentId)) return;
+        var fileName = this.CaptureFileName ?? $"capture-{this.CurrentSaveSlot.RunId}.json";
         try
         {
             LocalStream.Save(ServiceUtility.ConfigDirectory, fileName, this.CurrentSaveSlot).GetAwaiter().GetResult();
@@ -207,13 +239,16 @@ public sealed unsafe class DataCommon : IDisposable
 
     public SaveSlot? LoadDeepDungeonData(bool showFloorSetTimeValues, string fileName)
     {
+        if (this.IsInside && this.HasStartedCapture) return this.CurrentSaveSlot;
         this.ShowFloorSetTimeValues = showFloorSetTimeValues;
-        this.CurrentSaveSlot = LocalStream.Load<SaveSlot>(ServiceUtility.ConfigDirectory, fileName);
+        this.CurrentSaveSlot = LocalStream.Load<SaveSlot>(ServiceUtility.ConfigDirectory, fileName, SaveSlot.IsValid);
+        this.CaptureFileName = this.CurrentSaveSlot != null ? fileName : null;
         return this.CurrentSaveSlot;
     }
 
     public void LoadDeepDungeonData(bool showFloorSetTimeValues, bool ignoreDeepDungeonRegion = false)
     {
+        if (this.IsInside && this.HasStartedCapture) return;
         var data = this.SaveSlotSelection.GetSelectionData(this.CharacterKey);
         var fileName = DataCommon.GetSaveSlotFileName(this.CharacterKey, data);
         this.CurrentSaveSlot =
@@ -234,37 +269,22 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void CharacterUpdate()
     {
-        var characterName = this.CharacterName;
-        if (string.IsNullOrWhiteSpace(this.CharacterName))
-            this.CharacterName = Service.ObjectTable.LocalPlayer?.Name.ToString() ?? string.Empty;
-
-        var serverName = this.ServerName;
-        if (string.IsNullOrWhiteSpace(this.ServerName))
-            this.ServerName = Service.ObjectTable.LocalPlayer?.HomeWorld.Value.Name.ToString() ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(characterName) && !string.IsNullOrWhiteSpace(this.CharacterName) &&
-            string.IsNullOrWhiteSpace(serverName) && !string.IsNullOrWhiteSpace(this.ServerName))
-        {
-            if (this.IsInDeepDungeonRegion)
-            {
-
-                this.SaveSlotSelection.ResetSelectionData();
-                if (!this.SaveSlotSelection.GetData().ContainsKey(this.CharacterKey))
-                {
-                    this.SaveSlotSelection.SetSelectionData(this.DeepDungeon, 0);
-                    this.SaveSlotSelection.Save(this.CharacterKey);
-                }
-
-                this.LoadDeepDungeonData(false);
-            }
-        }
+        var player = Service.ObjectTable.LocalPlayer;
+        if (player == null) return;
+        this.CharacterName = player.Name.TextValue;
+        this.ServerName = player.HomeWorld.Value.Name.ExtractText();
+        if (string.IsNullOrWhiteSpace(this.CharacterName) || string.IsNullOrWhiteSpace(this.ServerName) ||
+            this.InitializedCharacterKey == this.CharacterKey) return;
+        this.InitializedCharacterKey = this.CharacterKey;
+        this.SaveSlotSelection.ResetSelectionData();
+        if (this.IsInDeepDungeonRegion) this.LoadDeepDungeonData(false);
     }
 
     public void CheckForSolo()
     {
         this.IsSupportedParty = ServiceUtility.IsSupportedParty;
         var set = this.CurrentSaveSlot?.CurrentFloorSet();
-        if (set != null && !set.Completed && !set.Failed && set.PartySize != ServiceUtility.PartySize)
+        if (this.IsCapturing && set != null && set.PartySize != ServiceUtility.PartySize)
             this.CurrentSaveSlot?.Note("Party size changed during the set; the entry size is retained for scoring.");
         // Deduplicate deaths until resurrection.
         foreach (var character in Service.ObjectTable.OfType<ICharacter>())
@@ -273,10 +293,10 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void CheckForCharacterStats()
     {
+        if (!this.IsCapturing) return;
         this.CurrentSaveSlot?.CurrentLevelUpdate(Service.ObjectTable.LocalPlayer?.Level ?? 0);
-        var director = EventFramework.Instance()->GetContentDirector();
-        if (director == null || !this.CheckForValidContent((int)director->ContentId)) return;
-        var dungeon = (InstanceContentDeepDungeon*)director;
+        var dungeon = this.GetDungeonDirector(this.ContentId);
+        if (dungeon == null) return;
         if (this.DutyStatus == DutyStatus.None && dungeon->ContentTimeLeft > 0 && dungeon->ContentTimeLeft <= 3600)
         {
             this.FloorSetTime.Synchronize(TimeSpan.FromSeconds(3600 - dungeon->ContentTimeLeft));
@@ -289,30 +309,32 @@ public sealed unsafe class DataCommon : IDisposable
     public void CheckForBossKilled(DataText dataText)
     {
         ArgumentNullException.ThrowIfNull(dataText);
-        if (!this.IsBossFloor || this.IsBossDead) return;
+        if (!this.IsCapturing || !this.IsBossFloor || this.IsBossDead) return;
         foreach (var character in Service.ObjectTable.OfType<ICharacter>())
-        {
-            if (!character.IsDead || character.ObjectKind != ObjectKind.BattleNpc) continue;
-            bool isBoss = this.DeepDungeon == DeepDungeon.PilgrimsTraverse
-                ? PilgrimData.IsBoss(character.NameId, this.CurrentSaveSlot?.CurrentFloorNumber() ?? 0)
-                : dataText.IsBoss(character.Name.TextValue).Item1;
-            if (!isBoss || !this.DefeatedBosses.Add(character.NameId)) continue;
-            this.CurrentSaveSlot?.CurrentFloor()?.EnemyKilled();
-            var required = this.DeepDungeon == DeepDungeon.PilgrimsTraverse &&
-                this.CurrentSaveSlot?.CurrentFloorNumber() == 99 ? 2 : 1;
-            if (this.DefeatedBosses.Count < required) continue;
-            this.IsBossDead = true;
-            this.CurrentSaveSlot?.CurrentFloor()?.MarkBossDefeated();
-            this.CurrentSaveSlot?.CurrentFloorSet()?.MarkBossTime(this.FloorSetTime.TotalTime);
-            if (this.IsLastFloor) this.DutyCompleted();
-        }
+            if (character.IsDead && character.ObjectKind == ObjectKind.BattleNpc)
+                this.RecordBossDeath(dataText, character);
+    }
+
+    private void RecordBossDeath(DataText dataText, ICharacter character)
+    {
+        var isBoss = this.DeepDungeon == DeepDungeon.PilgrimsTraverse
+            ? PilgrimData.IsBoss(character.NameId, this.CurrentSaveSlot?.CurrentFloorNumber() ?? 0)
+            : dataText.IsBoss(character.Name.TextValue).Item1;
+        if (this.IsBossDead || !isBoss || !this.DefeatedBosses.Add(character.NameId)) return;
+        this.CurrentSaveSlot?.CurrentFloor()?.EnemyKilled();
+        var required = this.DeepDungeon == DeepDungeon.PilgrimsTraverse &&
+            this.CurrentSaveSlot?.CurrentFloorNumber() == 99 ? 2 : 1;
+        if (this.DefeatedBosses.Count < required) return;
+        this.IsBossDead = true;
+        this.CurrentSaveSlot?.CurrentFloor()?.MarkBossDefeated();
+        this.CurrentSaveSlot?.CurrentFloorSet()?.MarkBossTime(this.FloorSetTime.TotalTime);
     }
 
     public void CheckForMapReveal()
     {
         var currentFloor = this.CurrentSaveSlot?.CurrentFloor();
 
-        if (this.IsLastFloor || (currentFloor?.Map ?? false))
+        if (!this.IsCapturing || this.IsLastFloor || (currentFloor?.Map ?? false))
             return;
 
         if (MapUtility.IsMapFullyRevealed(currentFloor?.MapData ?? new()))
@@ -321,7 +343,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void CheckForTimeBonus()
     {
-        if (this.DutyStatus != DutyStatus.None)
+        if (!this.IsCapturing)
             return;
 
         this.CurrentSaveSlot?.CurrentFloorSet()?.CheckForTimeBonus(this.FloorSetTime.TotalTime);
@@ -329,7 +351,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void CheckForCairnOfPassageActivation(DataText dataText)
     {
-        if (this.IsCairnOfPassageActivated || (this.CurrentSaveSlot?.CurrentFloor()?.IsLastFloor() ?? false))
+        if (!this.IsCapturing || this.IsCairnOfPassageActivated || (this.CurrentSaveSlot?.CurrentFloor()?.IsLastFloor() ?? false))
             return;
 
         foreach (var enemy in Service.ObjectTable)
@@ -355,21 +377,16 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void CheckForBossStatusTimer(bool inCombat)
     {
-        if (inCombat && this.IsBossFloor)
-        {
-            unsafe
-            {
-                var enemy = Service.ObjectTable
-                    .Where(x => ((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)x.Address)->GetIsTargetable())
-                    .MaxBy(x => (x as ICharacter)?.MaxHp) as IBattleChara;
-                this.BossStatusTimerManager?.Update(enemy);
-            }
-        }
+        if (!this.IsCapturing || !inCombat || !this.IsBossFloor) return;
+        var enemy = Service.ObjectTable.OfType<IBattleChara>()
+            .Where(x => x.ObjectKind == ObjectKind.BattleNpc && x.IsTargetable && x.StatusFlags.HasFlag(StatusFlags.Hostile))
+            .MaxBy(x => x.MaxHp);
+        this.BossStatusTimerManager?.Update(enemy);
     }
 
     public void CheckForScoreWindowKills()
     {
-        if (this.WasScoreWindowShown || this.CurrentSaveSlot == null) return;
+        if (!this.HasStartedCapture || this.WasScoreWindowShown || this.CurrentSaveSlot == null) return;
         var kills = NodeUtility.ScoreWindowKills(Service.GameGui);
         var points = NodeUtility.ScoreWindowScorePoints(Service.GameGui);
         if (!kills.Item1 || !points.Item1 || points.Item2 < 0 || kills.Item2 < 0) return;
@@ -476,7 +493,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void EnchantmentMessageReceived(DataText dataText, string message)
     {
-        if (!this.IsEnchantmentsLoaded)
+        if (!this.IsCapturing || !this.IsEnchantmentsLoaded)
             return;
         
         var result = dataText?.IsEnchantment(message) ?? new();
@@ -487,6 +504,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void TrapMessageReceived(DataText dataText, string message)
     {
+        if (!this.IsCapturing) return;
         var result = dataText?.IsTrap(message) ?? new();
         if (result.Item1)
             this.CurrentSaveSlot?.CurrentFloor()?.TrapTriggered((Trap)(result.Item2! - TextIndex.LandmineTrap));
@@ -528,23 +546,23 @@ public sealed unsafe class DataCommon : IDisposable
     public void CharacterKilled(DataText dataText, uint entityId)
     {
         ArgumentNullException.ThrowIfNull(dataText);
-        if (this.CurrentSaveSlot?.CurrentFloorSet() is not { Completed: false, Failed: false }) return;
+        if (!this.IsCapturing) return;
         var character = Service.ObjectTable.SearchById(entityId) as ICharacter;
-        if (character == null) { this.CurrentSaveSlot.Note("A death event could not be resolved to a visible actor."); return; }
+        if (character == null) { this.CurrentSaveSlot!.Note("A death event could not be resolved to a visible actor."); return; }
         if (!this.RecordedDeaths.Record(entityId)) return;
         var name = character.Name.TextValue;
         if ((character.ObjectKind == ObjectKind.BattleNpc) && (character.StatusFlags.HasFlag(StatusFlags.Hostile) || dataText.IsMandragora(name).Item1 ||
             (this.DeepDungeon == DeepDungeon.PilgrimsTraverse && character.NameId == 14267)))
         {
-            if (!this.IsBossFloor)
-                this.CheckForEnemyKilled(dataText, name, entityId);
+            if (this.IsBossFloor) this.RecordBossDeath(dataText, character);
+            else this.CheckForEnemyKilled(dataText, name, entityId);
         }
         else if (character.ObjectKind == ObjectKind.Pc)
             this.CheckForPlayerKilled(character);
     }
 
-    private void FloorScoreUpdate(int? additional = null) => this.CurrentSaveSlot?.CurrentFloor()
-        ?.ScoreUpdate(this.TotalScore - this.CurrentSaveSlot.Score() + (additional ?? 0));
+    private void FloorScoreUpdate(int? additional = null) =>
+        this.CurrentSaveSlot?.UpdateCurrentFloorScore(this.TotalScore + (additional ?? 0));
 
     public void CalculateScore(ScoreCalculationType scoreCalculationType)
     {
@@ -555,11 +573,10 @@ public sealed unsafe class DataCommon : IDisposable
     public void StartFirstFloor(int contentId, DataText dataText)
     {
         ArgumentNullException.ThrowIfNull(dataText);
-        if (!this.CheckForValidContent(contentId) || !ServiceUtility.IsSupportedParty) return;
-        if (this.ContentId != 0) return;
-        var director = EventFramework.Instance()->GetContentDirector();
-        if (director == null || director->ContentId != contentId) return;
-        var dungeon = (InstanceContentDeepDungeon*)director;
+        if (!this.IsInside || this.HasStartedCapture || !this.CheckForValidContent(contentId) ||
+            !ServiceUtility.IsSupportedParty || this.InitializedCharacterKey != this.CharacterKey) return;
+        var dungeon = this.GetDungeonDirector(contentId);
+        if (dungeon == null || Service.ObjectTable.LocalPlayer is not { } player || player.Level < 1 || player.ClassJob.RowId == 0) return;
         var floorNumber = (int)dungeon->Floor;
         if (floorNumber < 1 || floorNumber > ScoreEngine.MaximumFloor(this.DeepDungeon)) return;
         dataText.LoadEnchantments();
@@ -568,30 +585,29 @@ public sealed unsafe class DataCommon : IDisposable
         this.FloorSetTime.Start();
         this.ShowFloorSetTimeValues = true;
         this.SaveSlotSelection.Save(this.CharacterKey);
-        var selection = this.SaveSlotSelection.GetSelectionData(this.CharacterKey);
+        var selection = this.SaveSlotSelection.GetCaptureSelectionData();
         var selected = selection?.DeepDungeon == this.DeepDungeon && selection.SaveSlotNumber is 1 or 2;
         SaveSlot? previous = selected
-            ? LocalStream.Load<SaveSlot>(ServiceUtility.ConfigDirectory, this.GetSaveSlotFileName(selection)) : null;
-        if (previous?.DeepDungeon == this.DeepDungeon && previous.CurrentFloorSet() is { Completed: false, Failed: false } &&
-            previous.ContentId == contentId && previous.CurrentFloorNumber() == floorNumber &&
-            previous.ClassJobId == Service.ObjectTable.LocalPlayer?.ClassJob.Value.RowId)
+            ? LocalStream.Load<SaveSlot>(ServiceUtility.ConfigDirectory, this.GetSaveSlotFileName(selection), SaveSlot.IsValid) : null;
+        var elapsed = dungeon->ContentTimeLeft is > 0 and <= 3600
+            ? TimeSpan.FromSeconds(3600 - dungeon->ContentTimeLeft) : (TimeSpan?)null;
+        var startKind = CaptureResumePolicy.Classify(previous, this.DeepDungeon, contentId, floorNumber,
+            player.ClassJob.Value.RowId, elapsed);
+        if (startKind == CaptureStartKind.Resume)
         {
-            this.CurrentSaveSlot = previous;
-            this.FloorSetTime.Restore(previous.CurrentFloorSet()!);
+            this.CurrentSaveSlot = previous!;
+            this.FloorSetTime.Restore(previous!.CurrentFloorSet()!);
             this.CurrentSaveSlot.Note("Tracking resumed within a set; events while the plugin was unloaded may be missing.");
         }
-        else if (previous?.DeepDungeon == this.DeepDungeon && previous.CurrentFloorSet()?.Completed == true &&
-            previous.CurrentFloorNumber() + 1 == floorNumber && floorNumber % 10 == 1)
+        else if (startKind == CaptureStartKind.Continue)
         {
-            this.CurrentSaveSlot = previous;
+            this.CurrentSaveSlot = previous!;
             this.CurrentSaveSlot.AddFloorSet(floorNumber);
             this.CurrentSaveSlot.ContentIdUpdate(contentId);
         }
-        else if (previous?.DeepDungeon == this.DeepDungeon && previous.CurrentFloorSet()?.Failed == true &&
-            previous.CurrentFloorSet()?.FirstFloor()?.Number == floorNumber &&
-            floorNumber < ScoreEngine.ChallengeStarts(this.DeepDungeon))
+        else if (startKind == CaptureStartKind.Retry)
         {
-            this.CurrentSaveSlot = previous;
+            this.CurrentSaveSlot = previous!;
             // Archive before rollback.
             LocalStream.Save(ServiceUtility.ConfigDirectory, $"attempt-{Guid.NewGuid():N}.json", previous).GetAwaiter().GetResult();
             this.CurrentSaveSlot.ResetFloorSet();
@@ -599,11 +615,15 @@ public sealed unsafe class DataCommon : IDisposable
         }
         else
         {
+            if (previous != null)
+                LocalStream.Save(ServiceUtility.ConfigDirectory, $"attempt-{Guid.NewGuid():N}.json", previous).GetAwaiter().GetResult();
             this.CurrentSaveSlot = new(this.DeepDungeon, contentId,
                 Service.ObjectTable.LocalPlayer?.ClassJob.Value.RowId ?? 0,
                 Service.ObjectTable.LocalPlayer?.Level ?? 0);
             this.CurrentSaveSlot.MarkCurrentSchema();
             this.CurrentSaveSlot.AddFloorSet(floorNumber);
+            if (floorNumber > 1)
+                this.CurrentSaveSlot.Note("Tracking began after floor 1; earlier floors and events are not in this capture.");
             if (floorNumber % 10 != 1)
             {
                 this.CurrentSaveSlot.CurrentFloorSet()?.SetTimerKnown(false);
@@ -615,12 +635,15 @@ public sealed unsafe class DataCommon : IDisposable
         var entryPartySize = 0;
         foreach (var member in dungeon->Party)
             if (member.EntityId != 0 && member.EntityId != 0xE0000000) entryPartySize++;
-        if (previous != this.CurrentSaveSlot || previous?.CurrentFloorSet()?.Time() == TimeSpan.Zero)
+        if (startKind != CaptureStartKind.Resume)
             this.CurrentSaveSlot.CurrentFloorSet()?.SetPartySize(entryPartySize is >= 1 and <= 4 ? entryPartySize : ServiceUtility.PartySize);
         if (ServiceUtility.PartySize > 1)
             this.CurrentSaveSlot.Note("Party estimate: distant events may be missing; the current candidate counts all observed party deaths.");
         if (this.DeepDungeon == DeepDungeon.PilgrimsTraverse)
             this.CurrentSaveSlot.Note("Pilgrim scoring uses an unverified EO-derived candidate. Juniper kills, candle effects, and final encounter weights need result samples.");
+        this.HasStartedCapture = true;
+        this.CaptureFileName = selected ? this.GetSaveSlotFileName(selection) : $"capture-{this.CurrentSaveSlot.RunId}.json";
+        this.IsBossDead = this.CurrentSaveSlot.CurrentFloor()?.BossDefeated ?? false;
         this.CheckForCharacterStats();
         this.EnableFlyTextScore = true;
         this.SaveDeepDungeonData();
@@ -628,9 +651,9 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void EnsureStarted(DataText dataText)
     {
-        if (this.ContentId != 0) return;
-        var director = EventFramework.Instance()->GetContentDirector();
-        if (director != null) this.StartFirstFloor((int)director->ContentId, dataText);
+        if (!this.IsInside || this.HasStartedCapture) return;
+        var dungeon = this.GetDungeonDirector();
+        if (dungeon != null) this.StartFirstFloor((int)dungeon->ContentId, dataText);
     }
 
     public void RecordObservedResult(int score, int kills)
@@ -643,60 +666,71 @@ public sealed unsafe class DataCommon : IDisposable
     public void SelectCaptureSlot(int number)
     {
         if (this.CurrentSaveSlot == null || number is < 1 or > 2) return;
-        var file = this.GetSaveSlotFileName(new(this.DeepDungeon, number));
-        if (LocalStream.Exists(ServiceUtility.ConfigDirectory, file))
-            LocalStream.Copy(ServiceUtility.ConfigDirectory, ServiceUtility.ConfigDirectory,
-                file, $"archive-{Guid.NewGuid():N}.json");
-        this.SaveSlotSelection.SetSelectionData(this.DeepDungeon, number);
-        this.SaveSlotSelection.Save(this.CharacterKey);
-        this.SaveDeepDungeonData();
+        var file = this.GetSaveSlotFileName(new(this.CurrentSaveSlot.DeepDungeon, number));
+        if (string.IsNullOrWhiteSpace(file)) return;
+        try
+        {
+            if (LocalStream.Exists(ServiceUtility.ConfigDirectory, file) &&
+                !LocalStream.Copy(ServiceUtility.ConfigDirectory, ServiceUtility.ConfigDirectory,
+                    file, $"archive-{Guid.NewGuid():N}.json"))
+            {
+                this.StorageError = "The destination slot could not be archived; its capture was left unchanged.";
+                return;
+            }
+            this.SaveSlotSelection.SetSelectionData(this.CurrentSaveSlot.DeepDungeon, number);
+            this.CaptureFileName = file;
+            this.SaveSlotSelection.Save(this.CharacterKey);
+            this.SaveDeepDungeonData();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            this.StorageError = e.Message;
+            Service.PluginLog.Error(e, "Could not associate the capture with a save slot.");
+        }
     }
 
     public void CheckForFloorChange()
     {
-        if (this.ContentId == 0 || this.DutyStatus != DutyStatus.None) return;
-        var director = EventFramework.Instance()->GetContentDirector();
-        if (director == null || director->ContentId != this.ContentId) return;
-        var floor = (int)((InstanceContentDeepDungeon*)director)->Floor;
-        if (floor == this.CurrentSaveSlot?.CurrentFloorNumber() + 1)
-        {
-            this.IsTransferenceInitiated = true;
-            this.StartNextFloor();
-        }
-        else if (floor > this.CurrentSaveSlot?.CurrentFloorNumber() + 1)
-            this.CurrentSaveSlot?.Note("The client skipped a floor transition; capture is incomplete.");
+        if (!this.IsCapturing) return;
+        var dungeon = this.GetDungeonDirector(this.ContentId);
+        if (dungeon == null) return;
+        if (dungeon->Floor > this.CurrentSaveSlot?.CurrentFloorNumber()) this.StartNextFloor();
+        if (this.CompletionPending && this.IsLastFloor) this.DutyCompleted();
     }
 
     public void StartNextFloor()
     {
-        // Retry when the director catches up with the network event.
-        var director = EventFramework.Instance()->GetContentDirector();
-        if (director == null || director->ContentId != this.ContentId ||
-            ((InstanceContentDeepDungeon*)director)->Floor != this.CurrentSaveSlot?.CurrentFloorNumber() + 1) return;
-        if (this.ContentId != 0 && this.IsTransferenceInitiated)
+        if (!this.IsCapturing) return;
+        var dungeon = this.GetDungeonDirector(this.ContentId);
+        if (dungeon == null) return;
+        var gap = dungeon->Floor - this.CurrentSaveSlot!.CurrentFloorNumber();
+        if (!CaptureFloorTransition.Advance(this.CurrentSaveSlot, this.FloorSetTime, dungeon->Floor)) return;
+        this.IsBossDead = false;
+        this.IsBronzeCofferOpened = false;
+        this.BossStatusTimerManager?.Dispose();
+        this.BossStatusTimerManager = null;
+        this.DefeatedBosses.Clear();
+        this.RecordedDeaths.Clear();
+        this.IsTransferenceInitiated = false;
+        this.IsCairnOfPassageActivated = false;
+        this.CairnOfPassageKillIds = [];
+        this.CalculateScore(ScoreCalculationType.CurrentFloor);
+        this.FloorEffect = new FloorEffect
         {
-            this.CurrentSaveSlot?.CurrentFloor()?.MarkCleared();
-            this.IsBossDead = false;
-            this.DefeatedBosses.Clear();
-            this.RecordedDeaths.Clear();
-            this.IsTransferenceInitiated = false;
-            this.IsCairnOfPassageActivated = false;
-            this.CairnOfPassageKillIds = [];
-            var time = this.FloorSetTime.AddFloor();
-            this.CurrentSaveSlot?.CurrentFloor()?.TimeUpdate(time);
-            this.CalculateScore(ScoreCalculationType.CurrentFloor);
-            this.FloorScoreUpdate();
-            this.CurrentSaveSlot?.AddFloor();
-            this.SaveDeepDungeonData();
-
-            var floorEffect = new FloorEffect
-            {
-                ShowPomanderOfAffluence = this.FloorEffect.IsPomanderOfAffluenceUsed,
-                ShowPomanderOfFlight = this.FloorEffect.IsPomanderOfFlightUsed,
-                ShowPomanderOfAlteration = this.FloorEffect.IsPomanderOfAlterationUsed
-            };
-            this.FloorEffect = floorEffect;
-        }
+            ShowPomanderOfAffluence = gap == 1 && this.FloorEffect.IsPomanderOfAffluenceUsed,
+            ShowPomanderOfFlight = gap == 1 && this.FloorEffect.IsPomanderOfFlightUsed,
+            ShowPomanderOfAlteration = gap == 1 && this.FloorEffect.IsPomanderOfAlterationUsed
+        };
+        this.SaveDeepDungeonData();
+    }
+    private InstanceContentDeepDungeon* GetDungeonDirector(int expectedContentId = 0)
+    {
+        var framework = EventFramework.Instance();
+        if (framework == null) return null;
+        var director = framework->GetContentDirector();
+        if (director == null || !this.CheckForValidContent((int)director->ContentId) ||
+            (expectedContentId != 0 && director->ContentId != expectedContentId)) return null;
+        return (InstanceContentDeepDungeon*)director;
     }
 
     public bool CheckForValidContent(int contentId) => IsValidContent(this.DeepDungeon, contentId);
@@ -714,7 +748,9 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void DutyCompleted()
     {
-        if (this.DutyStatus != DutyStatus.None || this.CurrentSaveSlot == null) return;
+        if (!this.IsCapturing || this.CurrentSaveSlot == null) return;
+        if (!this.IsLastFloor) { this.CompletionPending = true; return; }
+        this.CompletionPending = false;
         this.CheckForCharacterStats();
         this.CurrentSaveSlot.CurrentFloorSet()?.Complete(this.FloorSetTime.TotalTime);
         this.DutyStatus = DutyStatus.Complete;
@@ -727,7 +763,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void DutyFailed()
     {
-        if (this.DutyStatus != DutyStatus.None || this.CurrentSaveSlot == null) return;
+        if (!this.IsCapturing || this.CurrentSaveSlot == null) return;
         this.DutyStatus = DutyStatus.Failed;
         this.CurrentSaveSlot.CurrentFloorSet()?.Fail();
         if (this.CurrentSaveSlot.CurrentFloorNumber() >= ScoreEngine.ChallengeStarts(this.CurrentSaveSlot.DeepDungeon))
@@ -739,12 +775,14 @@ public sealed unsafe class DataCommon : IDisposable
         this.SaveDeepDungeonData();
     }
 
-    public void RegenPotionConsumed() => this.CurrentSaveSlot?.CurrentFloor()?.RegenPotionConsumed();
+    public void RegenPotionConsumed() { if (this.IsCapturing) this.CurrentSaveSlot?.CurrentFloor()?.RegenPotionConsumed(); }
 
-    public void BronzeChestOpened(Coffer coffer) => this.CurrentSaveSlot?.CurrentFloor()?.CofferOpened(coffer);
+    public void BronzeChestOpened(Coffer coffer) { if (this.IsCapturing) this.CurrentSaveSlot?.CurrentFloor()?.CofferOpened(coffer); }
 
     public void PomanderObtained(int itemId)
     {
+        if (!this.IsCapturing) return;
+        this.IsBronzeCofferOpened = false;
         var pomander = PilgrimData.MapPomander(itemId);
         if (pomander.HasValue) this.CurrentSaveSlot?.CurrentFloor()?.CofferOpened((Coffer)pomander.Value);
         else this.CurrentSaveSlot?.Note($"Unmapped pomander item {itemId}; its coffer was not classified.");
@@ -752,12 +790,16 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void AetherpoolObtained()
     {
+        if (!this.IsCapturing) return;
+        this.IsBronzeCofferOpened = false;
         if (!this.IsLastFloor)
             this.CurrentSaveSlot?.CurrentFloor()?.CofferOpened(Coffer.Aetherpool);
     }
 
     public void StoneObtained(int itemId)
     {
+        if (!this.IsCapturing) return;
+        this.IsBronzeCofferOpened = false;
         if (this.DeepDungeon == DeepDungeon.HeavenOnHigh)
         {
             MagiciteObtained(itemId);
@@ -778,6 +820,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void PomanderUsed(int itemId)
     {
+        if (!this.IsCapturing) return;
         var mapped = PilgrimData.MapPomander(itemId);
         if (!mapped.HasValue) { this.CurrentSaveSlot?.Note($"Unmapped pomander item {itemId}."); return; }
         var pomander = mapped.Value;
@@ -790,6 +833,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void StoneUsed(int itemId)
     {
+        if (!this.IsCapturing) return;
         if (this.DeepDungeon == DeepDungeon.HeavenOnHigh)
         {
             this.MagiciteUsed(itemId);
@@ -820,6 +864,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void TransferenceInitiated()
     {
+        if (!this.IsCapturing) return;
         this.WasMagiciteUsed = false;
         this.WasScoreWindowShown = false;
         this.NearbyEnemies = [];

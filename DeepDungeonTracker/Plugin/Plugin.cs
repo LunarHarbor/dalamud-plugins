@@ -1,4 +1,4 @@
-﻿using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Conditions;
 using Dalamud.Game.Inventory.InventoryEventArgTypes;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
@@ -26,23 +26,22 @@ public sealed class Plugin : IDalamudPlugin
 
     private Data Data { get; }
 
-    private static DutyHook? _dutyHook;
 
-    private static PacketActorControlHook? _packetActorControlHook;
+    private readonly PacketActorControlHook? _packetActorControlHook;
 
-    private static DungeonLogCapture? _systemLogMessageHook;
+    private readonly DungeonLogCapture? _systemLogMessageHook;
 
-    private static EffectResultPacketHook? _effectResultPacketHook;
+    private readonly EffectResultPacketHook? _effectResultPacketHook;
 
-    private static OpenTreasurePacketHook? _openTreasurePacketHook;
+    private readonly OpenTreasurePacketHook? _openTreasurePacketHook;
 
-    private static EventPlayPacketHook? _eventPlayPacketHook;
+    private bool IsDisposed;
 
     public Plugin(IDalamudPluginInterface pluginInterface)
     {
         pluginInterface?.Create<Service>();
 
-        this.Configuration = Service.PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+        this.Configuration = LoadConfiguration();
         this.Configuration.Initialize(Service.PluginInterface);
 
         this.Data = new(pluginInterface?.UiBuilder!, this.Configuration);
@@ -77,12 +76,26 @@ public sealed class Plugin : IDalamudPlugin
         Service.DutyState.DutyCompleted += this.DutyCompleted;
         Service.GameInventory.InventoryChangedRaw += this.InventoryChangedRaw;
 
-        _dutyHook = CreateHook(() => new DutyHook(), "Floor messages");
         _packetActorControlHook = CreateHook(() => new PacketActorControlHook(), "Death events");
         _systemLogMessageHook = CreateHook(() => new DungeonLogCapture(this.Data.Common), "Dungeon items");
         _effectResultPacketHook = CreateHook(() => new EffectResultPacketHook(), "Regen potions");
         _openTreasurePacketHook = CreateHook(() => new OpenTreasurePacketHook(this.Data.Common), "Bronze coffers");
-        _eventPlayPacketHook = CreateHook(() => new EventPlayPacketHook(), "Duty failure");
+    }
+
+    private static Configuration LoadConfiguration()
+    {
+        try { return Service.PluginInterface.GetPluginConfig() as Configuration ?? new(); }
+        catch (Exception e)
+        {
+            CaptureDiagnostics.Report("Configuration could not be loaded; defaults are in use", e);
+            return new();
+        }
+    }
+
+    private static void DisposeComponent(IDisposable? component)
+    {
+        try { component?.Dispose(); }
+        catch (Exception e) { CaptureDiagnostics.Report($"Disposal failed for {component?.GetType().Name}", e); }
     }
 
     private static T? CreateHook<T>(Func<T> factory, string channel) where T : class
@@ -97,6 +110,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        if (this.IsDisposed) return;
+        this.IsDisposed = true;
         Service.PluginInterface.UiBuilder.Draw -= this.Draw;
         Service.PluginInterface.UiBuilder.OpenConfigUi -= this.OpenConfigUi;
         Service.PluginInterface.UiBuilder.OpenMainUi -= this.OpenMainUi;
@@ -110,18 +125,16 @@ public sealed class Plugin : IDalamudPlugin
         Service.DutyState.DutyCompleted -= this.DutyCompleted;
         Service.GameInventory.InventoryChangedRaw -= this.InventoryChangedRaw;
 
-        _dutyHook?.Dispose();
-        _packetActorControlHook?.Dispose();
-        _systemLogMessageHook?.Dispose();
-        _effectResultPacketHook?.Dispose();
-        _openTreasurePacketHook?.Dispose();
-        _eventPlayPacketHook?.Dispose();
+        DisposeComponent(this._packetActorControlHook);
+        DisposeComponent(this._systemLogMessageHook);
+        DisposeComponent(this._effectResultPacketHook);
+        DisposeComponent(this._openTreasurePacketHook);
 
-        WindowEx.DisposeWindows(this.WindowSystem.Windows);
+        foreach (var window in this.WindowSystem.Windows) DisposeComponent(window as IDisposable);
         this.WindowSystem.RemoveAllWindows();
 
-        this.Commands.Dispose();
-        this.Data.Dispose();
+        DisposeComponent(this.Commands);
+        DisposeComponent(this.Data);
     }
 
     private void OnConfigCommand(string command, string args) => this.OpenConfigUi();
