@@ -1,0 +1,11 @@
+{
+  "Author": "Marconsou; LunarHarbor",
+  "Name": "Deep Dungeon Tracker — Pilgrim & Party",
+  "InternalName": "DeepDungeonTrackerPilgrim",
+  "AssemblyVersion": "1.1.0.0",
+  "Punchline": "Track Deep Dungeons, including Pilgrim’s Traverse and duo estimates.",
+  "Description": "Track solo and party runs, floor statistics, and score estimates. Independent community preview. Pilgrim’s Traverse scoring is provisional. Open settings with /ddtp.",
+  "Tags": [ "deep", "dungeon", "tracker", "dd", "potd", "hoh", "eo", "pt", "duo" ],
+  "RepoUrl": "https://github.com/LunarHarbor/dalamud-plugins",
+  "AcceptsFeedback": false
+}

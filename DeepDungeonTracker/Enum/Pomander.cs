@@ -1,0 +1,38 @@
+﻿namespace DeepDungeonTracker;
+
+public enum Pomander
+{
+    Safety,
+    Sight,
+    Strength,
+    Steel,
+    Affluence,
+    Flight,
+    Alteration,
+    Purity,
+    Fortune,
+    Witching,
+    Serenity,
+    Rage,
+    Lust,
+    Intuition,
+    Raising,
+    Resolution,
+    Frailty,
+    Concealment,
+    Petrification,
+    Lethargy,
+    Storms,
+    Dread,
+    Haste,
+    Purification,
+    Devotion,
+    InfernoMagicite = 60,
+    CragMagicite,
+    VortexMagicite,
+    ElderMagicite,
+    UneiDemiclone,
+    DogaDemiclone,
+    OnionKnightDemiclone,
+    JuniperIncense
+}

@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../DeepDungeonTracker/Score/ScoreEngine.cs" Link="Source/ScoreEngine.cs" />
+    <Compile Include="../../DeepDungeonTracker/Score/Score.cs" Link="Source/Score.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/SaveSlot.cs" Link="Source/SaveSlot.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/Floor.cs" Link="Source/Floor.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/FloorSet.cs" Link="Source/FloorSet.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/FloorSetTime.cs" Link="Source/FloorSetTime.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/MapData.cs" Link="Source/MapData.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/DeathLedger.cs" Link="Source/DeathLedger.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/PilgrimData.cs" Link="Source/PilgrimData.cs" />
+    <Compile Include="../../DeepDungeonTracker/Common/LocalStream.cs" Link="Source/LocalStream.cs" />
+    <Compile Include="../../DeepDungeonTracker/Enum/*.cs" Link="Source/%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

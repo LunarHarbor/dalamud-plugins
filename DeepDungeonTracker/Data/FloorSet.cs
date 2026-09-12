@@ -1,0 +1,132 @@
+﻿using System;
+using System.Collections.ObjectModel;
+using System.Linq;
+using System.Text.Json.Serialization;
+
+namespace DeepDungeonTracker;
+
+public class FloorSet
+{
+    [JsonInclude]
+    public int PartySize { get; private set; } = 1;
+
+    [JsonInclude]
+    public bool Completed { get; private set; }
+
+    [JsonInclude]
+    public bool Failed { get; private set; }
+
+    [JsonInclude]
+    public int? ObservedScore { get; private set; }
+
+    [JsonInclude]
+    public int? ObservedKills { get; private set; }
+
+    public void SetPartySize(int size) => this.PartySize = Math.Clamp(size, 1, 4);
+
+    public void RecordResult(int score, int kills) { this.ObservedScore = score; this.ObservedKills = kills; }
+
+    [JsonInclude]
+    public TimeSpan? BossClearTime { get; private set; }
+
+    public void MarkBossTime(TimeSpan elapsed) => this.BossClearTime ??= elapsed;
+
+    [JsonInclude]
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public bool TimerKnown { get; private set; } = true;
+    public void SetTimerKnown(bool known) => this.TimerKnown = known;
+
+    public void Complete(TimeSpan elapsed)
+    {
+        if (this.Failed || this.Completed) return;
+        this.Completed = true;
+        this.CurrentFloor()?.MarkCleared();
+        this.TimeBonus = this.TimerKnown && (this.BossClearTime ?? elapsed) < TimeSpan.FromMinutes(30);
+    }
+
+    public void Fail() { if (!this.Completed) { this.Failed = true; this.TimeBonus = false; } }
+
+    [JsonInclude]
+    public bool TimeBonus { get; private set; }
+
+    [JsonInclude]
+    public Collection<Floor> Floors { get; private set; } = [];
+
+    [JsonInclude]
+    public BossStatusTimerData? BossStatusTimerData { get; private set; }
+
+    public TimeSpan Time() => new(this.Floors.Sum(x => x.Time.Ticks));
+
+    public int Score() => this.Floors.Sum(x => x.Score);
+
+    public int Kills() => this.Floors.Sum(x => x.Kills);
+
+    public int CairnOfPassageKills() => this.Floors.Sum(x => x.CairnOfPassageKills);
+
+    public int Mimics() => this.Floors.Sum(x => x.Mimics);
+
+    public int Mandragoras() => this.Floors.Sum(x => x.Mandragoras);
+
+    public int NPCs() => this.Floors.Sum(x => x.NPCs);
+
+    public int DreadBeasts() => this.Floors.Sum(x => x.DreadBeasts);
+
+    public int Coffers() => this.Floors.Sum(x => x.Coffers.Count);
+
+    public int Enchantments() => this.Floors.Sum(x => x.Enchantments.Count);
+
+    public int Traps() => this.Floors.Sum(x => x.Traps.Count);
+
+    public int Pomanders() => this.Floors.Sum(x => x.Pomanders.Count);
+
+    public int Deaths() => this.Floors.Sum(x => x.Deaths);
+
+    public int RegenPotions() => this.Floors.Sum(x => x.RegenPotions);
+
+    public int Potsherds() => this.Floors.Sum(x => x.Potsherds());
+
+    public int Lurings() => this.Floors.Sum(x => x.Lurings());
+
+    public int Maps() => this.Floors.Sum(x => x.Map ? 1 : 0);
+
+    public int HallOfFallacies() => this.Floors.Sum(x => x.MapData.FloorType == FloorType.HallOfFallacies ? 1 : 0);
+
+    private int RoomsFloor(int rooms) => this.Floors.Sum(x => x.MapData.FloorType == FloorType.Normal && x.Map && x.MapData.RoomIds.Count(y => y != null) == rooms ? 1 : 0);
+
+    public int ThreeRoomsFloor() => this.RoomsFloor(3);
+
+    public int FourRoomsFloor() => this.RoomsFloor(4);
+
+    public int FiveRoomsFloor() => this.RoomsFloor(5);
+
+    public int SixRoomsFloor() => this.RoomsFloor(6);
+
+    public int SevenRoomsFloor() => this.RoomsFloor(7);
+
+    public int EightRoomsFloor() => this.RoomsFloor(8);
+
+    public Floor? FirstFloor() => this.Floors.FirstOrDefault();
+
+    public Floor? CurrentFloor() => this.Floors.LastOrDefault();
+
+    public Floor? LastFloor() => this.Floors.FirstOrDefault(x => x.IsLastFloor());
+
+    public void AddFloor(int number) => this.Floors.Add(new(number));
+
+    public void ClearFloors() => this.Floors.Clear();
+
+    public void CheckForTimeBonus(TimeSpan totalTime)
+    {
+        if (this.Completed) this.TimeBonus = this.TimerKnown && (this.BossClearTime ?? totalTime) < TimeSpan.FromMinutes(30);
+    }
+
+    public void NoTimeBonus() => this.TimeBonus = false;
+
+    public BossStatusTimerManager StartBossStatusTimer(Action isBossDeadAction)
+    {
+        this.BossStatusTimerData = new();
+        return new BossStatusTimerManager(this.BossStatusTimerData, isBossDeadAction);
+    }
+
+    public void EndBossStatusTimer() => this.BossStatusTimerData?.TimerEnd();
+}
