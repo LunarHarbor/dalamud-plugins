@@ -62,32 +62,41 @@ public unsafe static partial class NodeUtility
 
     public static int SaveSlotNumber(IGameGui gameGui)
     {
-        static AtkResNode* GetSlotNode(AtkUnitBase* addon, int index)
-        {
-            var componentNode = AsComponent(NodeUtility.GetAddonChildNode(addon, 2));
-            componentNode = AsComponent(NodeUtility.GetComponentChildNode(componentNode, index));
-            return NodeUtility.GetComponentChildNode(componentNode, 1);
-        }
-
-        var saveSlotNumber = 0;
         var addon = (AtkUnitBase*)gameGui?.GetAddonByName("DeepDungeonSaveData", 1).Address!;
         if (addon == null || !addon->IsVisible)
-            return saveSlotNumber;
+            return 0;
 
-        var slot1Node = GetSlotNode(addon, 1);
-        var slot2Node = GetSlotNode(addon, 2);
+        // Use the same save-list node as the legacy layout, checking its native type first.
+        var node = NodeUtility.GetAddonChildNode(addon, 2);
+        var container = AsComponent(node);
+        if (container == null || container->Component == null ||
+            (container->Component->ComponentFlags & 1) == 0)
+            return 0;
 
-        if (slot1Node != null && slot2Node != null)
+        var componentType = container->Component->GetComponentType();
+        if (componentType == ComponentType.List)
         {
-            var r1 = slot1Node->AddRed;
-            var r2 = slot2Node->AddRed;
-
-            if (r1 > r2)
-                saveSlotNumber = 1;
-            else if (r2 > r1)
-                saveSlotNumber = 2;
+            var list = node->GetAsAtkComponentList();
+            if (list == null || list->ListLength != 2)
+                return 0;
+            // SelectedItemIndex differs from the hovered/held row and is -1 when no row is selected.
+            return list->SelectedItemIndex is 0 or 1 ? list->SelectedItemIndex + 1 : 0;
         }
-        return saveSlotNumber;
+
+        // Keep the legacy highlight fallback only for a plain container. Do not reinterpret an unknown component or
+        // override an explicit "no selection" from a typed list with its hover animation.
+        if (componentType != ComponentType.Base)
+            return 0;
+        static AtkResNode* GetLegacySlotNode(AtkComponentNode* container, int index)
+        {
+            var row = AsComponent(NodeUtility.GetComponentChildNode(container, index));
+            return NodeUtility.GetComponentChildNode(row, 1);
+        }
+        var slot1Node = GetLegacySlotNode(container, 1);
+        var slot2Node = GetLegacySlotNode(container, 2);
+        if (slot1Node == null || slot2Node == null || !slot1Node->IsVisible() || !slot2Node->IsVisible())
+            return 0;
+        return slot1Node->AddRed > slot2Node->AddRed ? 1 : slot2Node->AddRed > slot1Node->AddRed ? 2 : 0;
     }
 
     public static (bool, bool) SaveSlotDeletion(IGameGui gameGui)

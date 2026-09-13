@@ -9,7 +9,7 @@ public static class CaptureFloorTransition
         if (save.CurrentFloorSet() is not { Completed: false, Failed: false }) return false;
         var end = (save.CurrentFloorNumber() - 1) / 10 * 10 + 10;
         if (save.CurrentFloorNumber() == end) return true;
-        save.Note("Duty completion arrived before the final floor update. Missing floor events could not be recovered.");
+        save.Note("The set cleared before its final floor update was captured. Missing floor events could not be recovered.");
         return Advance(save, timer, end);
     }
 

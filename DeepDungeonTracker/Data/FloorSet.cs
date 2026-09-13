@@ -16,6 +16,10 @@ public class FloorSet
     [JsonInclude]
     public bool Failed { get; private set; }
 
+    // Older captures marked every unrecognized exit as failed. Keep explicit failures distinct.
+    [JsonInclude]
+    public bool FailureObserved { get; private set; }
+
     [JsonInclude]
     public int? ObservedScore { get; private set; }
 
@@ -47,7 +51,16 @@ public class FloorSet
         this.TimeBonus = this.HasTimeBonus(elapsed);
     }
 
-    public void Fail() { if (!this.Completed) { this.Failed = true; this.TimeBonus = false; } }
+    public void Fail() { if (!this.Completed) { this.Failed = true; this.FailureObserved = true; this.TimeBonus = false; } }
+
+    public void ConfirmContinuation()
+    {
+        if (this.Completed || this.FailureObserved) return;
+        this.Failed = false;
+        this.Complete(this.Time());
+        // Reaching the next set proves completion, but not when the preceding boss died.
+        if (!this.BossClearTime.HasValue) this.NoTimeBonus();
+    }
 
     [JsonInclude]
     public bool TimeBonus { get; private set; }

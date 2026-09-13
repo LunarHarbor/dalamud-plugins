@@ -19,6 +19,8 @@ public sealed unsafe class DataCommon : IDisposable
     private bool HasStartedCapture { get; set; }
     private bool CompletionPending { get; set; }
     private string? CaptureFileName { get; set; }
+    private uint CaptureTerritoryType { get; set; }
+    private CapturePendingCompletion? PendingExitCompletion { get; set; }
     private string? InitializedCharacterKey { get; set; }
     public bool IsCapturing => this.IsInside && this.HasStartedCapture && this.DutyStatus == DutyStatus.None &&
         this.CurrentSaveSlot?.CurrentFloorSet() is { Completed: false, Failed: false };
@@ -122,6 +124,7 @@ public sealed unsafe class DataCommon : IDisposable
         this.CharacterName = string.Empty;
         this.ServerName = string.Empty;
         this.InitializedCharacterKey = null;
+        this.PendingExitCompletion = null;
         this.HasStartedCapture = false;
         this.CaptureFileName = null;
         this.CurrentSaveSlot = null;
@@ -133,6 +136,7 @@ public sealed unsafe class DataCommon : IDisposable
 
     public void EnteringDeepDungeon()
     {
+        this.PendingExitCompletion = null;
         this.IsInside = true;
         this.HasStartedCapture = false;
         this.CompletionPending = false;
@@ -161,10 +165,17 @@ public sealed unsafe class DataCommon : IDisposable
     public void ExitingDeepDungeon()
     {
         this.EnableFlyTextScore = false;
-        if (this.CompletionPending && this.IsCapturing &&
-            CaptureFloorTransition.ReachCompletedSetEnd(this.CurrentSaveSlot!, this.FloorSetTime))
-            this.DutyCompleted();
-        if (this.IsCapturing && !this.CompletionPending) this.DutyFailed();
+        if (this.IsCapturing)
+        {
+            var outcome = CaptureSetOutcome.FinalizeExit(this.CurrentSaveSlot!, this.FloorSetTime,
+                this.CompletionPending, confirmedFailure: false);
+            if (outcome == CaptureExitOutcome.Completed) this.DutyStatus = DutyStatus.Complete;
+            else if (outcome == CaptureExitOutcome.Interrupted && this.CaptureFileName is { } file)
+                this.PendingExitCompletion = new(this.CurrentSaveSlot!, this.FloorSetTime, file,
+                    this.CaptureTerritoryType, DateTime.UtcNow);
+            this.CalculateScore(ScoreCalculationType.CurrentFloor);
+            this.FloorScoreUpdate();
+        }
         if (this.HasStartedCapture) this.SaveDeepDungeonData();
         this.IsInside = false;
         this.HasStartedCapture = false;
@@ -582,69 +593,40 @@ public sealed unsafe class DataCommon : IDisposable
         dataText.LoadEnchantments();
         this.IsEnchantmentsLoaded = true;
         this.FloorEffect = new();
-        this.FloorSetTime.Start();
         this.ShowFloorSetTimeValues = true;
         this.SaveSlotSelection.Save(this.CharacterKey);
         var selection = this.SaveSlotSelection.GetCaptureSelectionData();
-        var selected = selection?.DeepDungeon == this.DeepDungeon && selection.SaveSlotNumber is 1 or 2;
-        SaveSlot? previous = selected
-            ? LocalStream.Load<SaveSlot>(ServiceUtility.ConfigDirectory, this.GetSaveSlotFileName(selection), SaveSlot.IsValid) : null;
         var elapsed = dungeon->ContentTimeLeft is > 0 and <= 3600
             ? TimeSpan.FromSeconds(3600 - dungeon->ContentTimeLeft) : (TimeSpan?)null;
-        var startKind = CaptureResumePolicy.Classify(previous, this.DeepDungeon, contentId, floorNumber,
-            player.ClassJob.Value.RowId, elapsed);
-        if (startKind == CaptureStartKind.Resume)
+        CaptureStartResult capture;
+        try
         {
-            this.CurrentSaveSlot = previous!;
-            this.FloorSetTime.Restore(previous!.CurrentFloorSet()!);
-            this.CurrentSaveSlot.Note("Tracking resumed within a set; events while the plugin was unloaded may be missing.");
+            capture = CaptureRunStore.Start(ServiceUtility.ConfigDirectory, this.CharacterKey, selection,
+                this.DeepDungeon, contentId, floorNumber, player.ClassJob.Value.RowId, player.Level,
+                elapsed, this.FloorSetTime);
         }
-        else if (startKind == CaptureStartKind.Continue)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {
-            this.CurrentSaveSlot = previous!;
-            this.CurrentSaveSlot.AddFloorSet(floorNumber);
-            this.CurrentSaveSlot.ContentIdUpdate(contentId);
+            this.StorageError = e.Message;
+            Service.PluginLog.Error(e, "Could not open the dungeon capture; existing data was left unchanged.");
+            return;
         }
-        else if (startKind == CaptureStartKind.Retry)
-        {
-            this.CurrentSaveSlot = previous!;
-            // Archive before rollback.
-            LocalStream.Save(ServiceUtility.ConfigDirectory, $"attempt-{Guid.NewGuid():N}.json", previous).GetAwaiter().GetResult();
-            this.CurrentSaveSlot.ResetFloorSet();
-            this.CurrentSaveSlot.ContentIdUpdate(contentId);
-        }
-        else
-        {
-            if (previous != null)
-                LocalStream.Save(ServiceUtility.ConfigDirectory, $"attempt-{Guid.NewGuid():N}.json", previous).GetAwaiter().GetResult();
-            this.CurrentSaveSlot = new(this.DeepDungeon, contentId,
-                Service.ObjectTable.LocalPlayer?.ClassJob.Value.RowId ?? 0,
-                Service.ObjectTable.LocalPlayer?.Level ?? 0);
-            this.CurrentSaveSlot.MarkCurrentSchema();
-            this.CurrentSaveSlot.AddFloorSet(floorNumber);
-            if (floorNumber > 1)
-                this.CurrentSaveSlot.Note("Tracking began after floor 1; earlier floors and events are not in this capture.");
-            if (floorNumber % 10 != 1)
-            {
-                this.CurrentSaveSlot.CurrentFloorSet()?.SetTimerKnown(false);
-                this.CurrentSaveSlot.Note("Tracking began partway through a set; earlier events are missing.");
-            }
-            if (!selected)
-                this.CurrentSaveSlot.Note("No game save slot was identified. This capture is preserved separately; select the slot in settings before the next set to resume.");
-        }
+        this.CurrentSaveSlot = capture.Save;
         var entryPartySize = 0;
         foreach (var member in dungeon->Party)
             if (member.EntityId != 0 && member.EntityId != 0xE0000000) entryPartySize++;
-        if (startKind != CaptureStartKind.Resume)
+        if (capture.Kind != CaptureStartKind.Resume)
             this.CurrentSaveSlot.CurrentFloorSet()?.SetPartySize(entryPartySize is >= 1 and <= 4 ? entryPartySize : ServiceUtility.PartySize);
         if (ServiceUtility.PartySize > 1)
             this.CurrentSaveSlot.Note("Party estimate: distant events may be missing; the current candidate counts all observed party deaths.");
         if (this.DeepDungeon == DeepDungeon.PilgrimsTraverse)
             this.CurrentSaveSlot.Note("Pilgrim scoring uses an unverified EO-derived candidate. Juniper kills, candle effects, and final encounter weights need result samples.");
         this.HasStartedCapture = true;
-        this.CaptureFileName = selected ? this.GetSaveSlotFileName(selection) : $"capture-{this.CurrentSaveSlot.RunId}.json";
+        this.CaptureFileName = capture.FileName;
+        this.CaptureTerritoryType = Service.ClientState.TerritoryType;
         this.IsBossDead = this.CurrentSaveSlot.CurrentFloor()?.BossDefeated ?? false;
         this.CheckForCharacterStats();
+        this.CalculateScore(ScoreCalculationType.CurrentFloor);
         this.EnableFlyTextScore = true;
         this.SaveDeepDungeonData();
     }
@@ -745,6 +727,30 @@ public sealed unsafe class DataCommon : IDisposable
     };
 
     public void DutyStarted(DataText dataText) => this.EnsureStarted(dataText);
+
+    public void ObserveDutyCompletion(uint territoryType)
+    {
+        if (this.IsInside)
+        {
+            if (territoryType == this.CaptureTerritoryType) this.DutyCompleted();
+            return;
+        }
+        try
+        {
+            if (this.PendingExitCompletion?.TryComplete(ServiceUtility.ConfigDirectory, territoryType, DateTime.UtcNow) == true)
+            {
+                this.StorageError = null;
+                if (ReferenceEquals(this.CurrentSaveSlot, this.PendingExitCompletion.Save))
+                    this.CalculateScore(ScoreCalculationType.CurrentFloor);
+                this.PendingExitCompletion = null;
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+            this.StorageError = e.Message;
+            Service.PluginLog.Error(e, "Could not save the late dungeon completion.");
+        }
+    }
 
     public void DutyCompleted()
     {

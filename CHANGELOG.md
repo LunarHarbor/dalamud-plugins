@@ -1,5 +1,12 @@
 # Patch notes
 
+## 1.1.2 — September 13, 2026
+
+- Fixed run totals resetting between ten-floor sets when a completion event was missed.
+- Improved save-slot detection during entry while keeping the two slots separate.
+- Restored accumulated score immediately when continuing a run.
+- Preserved uncertain exits and recovered eligible captures affected by the previous exit handling.
+
 ## 1.1.1 — September 12, 2026
 
 - Fixed capture startup and recovery across duties and plugin reloads.

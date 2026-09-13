@@ -33,7 +33,7 @@ internal static class CaptureReviewChecks
         Equal(CaptureStartKind.New, Kind(slotOne, 31, job: 19, elapsed: TimeSpan.FromMinutes(5)), "another job cannot inherit in-progress capture");
         Equal(CaptureStartKind.New, Kind(slotOne, 31, content: 60034, dungeon: DeepDungeon.EurekaOrthos,
             elapsed: TimeSpan.FromMinutes(5)), "another dungeon cannot inherit matching floor capture");
-        Equal(CaptureStartKind.New, Kind(slotOne, 41, content: 60045), "unrecorded floors cannot be assumed complete");
+        Equal(CaptureStartKind.Continue, Kind(slotOne, 41, content: 60045), "observed same-slot next set proves traversal despite missed end updates");
         Equal(1, slotOne.Kills(), "capture classification does not alter existing slot events");
 
         var completed = RunAt(40);

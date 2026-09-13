@@ -129,10 +129,7 @@ public sealed class Data : IDisposable
 
                 if (ServiceUtility.IsSupportedParty)
                 {
-                    if (!this.InDutyQueue.IsActivated)
-                    {
-                        this.Common.CheckForSaveSlotSelection();
-                    }
+                    this.Common.CheckForSaveSlotSelection();
                 }
                 else
                 {
@@ -241,14 +238,14 @@ public sealed class Data : IDisposable
         }
     }
 
-    public void DutyCompleted()
+    public void DutyCompleted(uint territoryType)
     {
         if (this.InDeepDungeon.IsActivated)
         {
             this.Common.CheckForBossKilled(this.Text);
             this.Common.CheckForFloorChange();
-            this.Common.DutyCompleted();
         }
+        this.Common.ObserveDutyCompletion(territoryType);
     }
 
     public void InventoryChangedRaw(IReadOnlyCollection<InventoryEventArgs> inventoryEventArgs)
@@ -282,7 +279,12 @@ public sealed class Data : IDisposable
         }
     }
 
-    private void DeepDungeonActivating() => this.Common.EnteringDeepDungeon();
+    private void DeepDungeonActivating()
+    {
+        // Take one last sample before the save dialog disappears during entry.
+        this.Common.CheckForSaveSlotSelection();
+        this.Common.EnteringDeepDungeon();
+    }
 
     private void DeepDungeonDeactivating() => this.Common.ExitingDeepDungeon();
 

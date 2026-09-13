@@ -14,7 +14,10 @@ public static class CaptureResumePolicy
         if (!set.Completed && !set.Failed && previous.ContentId == contentId &&
             previous.CurrentFloorNumber() == floor && elapsed.HasValue &&
             elapsed.Value + TimeSpan.FromSeconds(5) >= set.Time()) return CaptureStartKind.Resume;
-        if (set.Completed && previous.CurrentFloorNumber() + 1 == floor && floor % 10 == 1)
+        // Called only with a capture loaded for the freshly observed game slot.
+        // Entry to the following set proves the prior clear, even if its last updates were missed.
+        if ((!set.Failed || (!set.FailureObserved && previous.CurrentFloor()?.BossDefeated == true)) &&
+            (previous.CurrentFloorNumber() - 1) / 10 + 1 == (floor - 1) / 10 && floor % 10 == 1)
             return CaptureStartKind.Continue;
         if (set.Failed && set.FirstFloor()?.Number == floor && floor < ScoreEngine.ChallengeStarts(dungeon))
             return CaptureStartKind.Retry;

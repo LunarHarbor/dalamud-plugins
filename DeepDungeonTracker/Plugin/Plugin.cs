@@ -210,7 +210,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DutyStarted(IDutyStateEventArgs args) => this.Data.DutyStarted(args.TerritoryType.RowId);
 
-    private void DutyCompleted(IDutyStateEventArgs args) => this.Data.DutyCompleted();
+    private void DutyCompleted(IDutyStateEventArgs args) => this.Data.DutyCompleted(args.TerritoryType.RowId);
 
     private void InventoryChangedRaw(IReadOnlyCollection<InventoryEventArgs> events) => this.Data.InventoryChangedRaw(events);
 

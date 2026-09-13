@@ -37,7 +37,7 @@ Requires Windows and .NET SDK 10.0.4xx.
 ./scripts/Build.ps1 -Bootstrap
 ```
 
-Output: `artifacts/DeepDungeonTrackerPilgrim-1.1.1.0.zip`.
+Output: `artifacts/DeepDungeonTrackerPilgrim-1.1.2.0.zip`.
 
 [Patch notes](CHANGELOG.md) · [Quick start](docs/QUICKSTART.md)
 

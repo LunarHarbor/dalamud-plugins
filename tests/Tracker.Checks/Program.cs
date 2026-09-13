@@ -166,6 +166,9 @@ checks += ScoreReviewChecks.Run();
 checks += CaptureReviewChecks.Run();
 checks += TimerReviewChecks.Run();
 checks += UiSaveReviewChecks.Run();
+checks += CaptureSetOutcomeChecks.Run();
+checks += SetContinuationChecks.Run();
+checks += CapturePendingCompletionChecks.Run();
 Console.WriteLine($"PASS: {checks} score, capture, lifecycle, mapping, and persistence checks.");
 
 sealed class Unserializable { public string Value => throw new InvalidOperationException("synthetic serialization failure"); }

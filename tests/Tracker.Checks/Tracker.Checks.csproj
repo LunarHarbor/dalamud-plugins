@@ -16,7 +16,10 @@
     <Compile Include="../../DeepDungeonTracker/Data/DeathLedger.cs" Link="Source/DeathLedger.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/PilgrimData.cs" Link="Source/PilgrimData.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/CaptureResumePolicy.cs" Link="Source/CaptureResumePolicy.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/CaptureRunStore.cs" Link="Source/CaptureRunStore.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/CapturePendingCompletion.cs" Link="Source/CapturePendingCompletion.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/CaptureFloorTransition.cs" Link="Source/CaptureFloorTransition.cs" />
+    <Compile Include="../../DeepDungeonTracker/Data/CaptureSetOutcome.cs" Link="Source/CaptureSetOutcome.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/SaveSlotSelection.cs" Link="Source/SaveSlotSelection.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/BossStatusTimerData.cs" Link="Source/BossStatusTimerData.cs" />
     <Compile Include="../../DeepDungeonTracker/Data/BossStatusTimerItem.cs" Link="Source/BossStatusTimerItem.cs" />
